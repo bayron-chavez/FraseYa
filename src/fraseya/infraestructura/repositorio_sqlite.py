@@ -190,6 +190,16 @@ class RepositorioSQLite:
                 ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor''',
                 (self._texto(clave, 'Clave'), valor))
 
+    def guardar_configuraciones(self, valores):
+        """Guarda varias claves en una sola transacción: o se guardan todas o ninguna."""
+        if not all(isinstance(v, str) for v in valores.values()):
+            raise ValueError('La configuración se guarda como texto.')
+        with self.db:
+            for clave, valor in valores.items():
+                self.db.execute('''INSERT INTO CONFIGURACION(clave,valor) VALUES(?,?)
+                    ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor''',
+                    (self._texto(clave, 'Clave'), valor))
+
     def leer_configuracion(self, clave, predeterminado=None):
         row = self.db.execute('SELECT valor FROM CONFIGURACION WHERE clave=?', (clave,)).fetchone()
         return row[0] if row else predeterminado

@@ -82,3 +82,46 @@ def test_detener_libera_a_quien_espera_y_rechaza_llamadas_nuevas(raiz):
     assert not hilo.is_alive() and 'cerró' in str(salida['error'])
     with pytest.raises(RuntimeError):
         puente.llamar(lambda: 1)
+
+
+def test_publicar_ejecuta_en_el_hilo_de_tkinter_sin_bloquear(raiz):
+    puente = PuenteHiloPrincipal(raiz, intervalo_ms=10)
+    recibido = []
+    hilo = threading.Thread(target=lambda: puente.publicar(lambda: recibido.append(threading.get_ident())))
+    hilo.start(); hilo.join()
+    assert recibido == []                      # publicar no ejecuta nada por sí mismo
+    limite = time.time() + 2
+    while not recibido and time.time() < limite:
+        raiz.update(); time.sleep(0.01)
+    assert recibido == [threading.get_ident()]
+    puente.detener()
+
+
+def test_publicar_tras_detener_se_ignora(raiz):
+    puente = PuenteHiloPrincipal(raiz, intervalo_ms=10)
+    puente.detener()
+    puente.publicar(lambda: 1)                 # no debe fallar ni acumular
+    assert puente._cola.empty()
+
+
+def test_expansion_aplica_los_ajustes_sin_reiniciar():
+    from fraseya.aplicacion.configuracion import Ajustes
+    from fraseya.presentacion.expansion import Expansion
+
+    class Escritor:
+        velocidad_ms = 20
+
+    class Teclado:
+        def __init__(self):
+            self.cambios, self.pausado = [], False
+
+        def configurar(self, tecla, atajo):
+            self.cambios.append((tecla, atajo))
+
+    escritor, teclado = Escritor(), Teclado()
+    expansion = Expansion(escritor, teclado, puente=None)
+    expansion.aplicar(Ajustes('enter', 'ctrl+shift+k', 45, '', 15))
+    assert escritor.velocidad_ms == 45
+    assert teclado.cambios == [('enter', 'ctrl+shift+k')]
+    expansion.pausar(True)
+    assert teclado.pausado is True

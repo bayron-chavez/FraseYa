@@ -2,14 +2,14 @@
 import queue
 import threading
 
+from fraseya.aplicacion.configuracion import Configuracion
 from fraseya.aplicacion.motor_expansion import MotorExpansion
-from fraseya.infraestructura.escritor_texto import (VELOCIDAD_PREDETERMINADA_MS, EscritorTexto)
-from fraseya.infraestructura.teclado_global import (TECLA_PREDETERMINADA, TecladoGlobal,
-                                                    activar_ventana, ventana_activa)
+from fraseya.infraestructura.escritor_texto import EscritorTexto
+from fraseya.infraestructura.teclado_global import (TecladoGlobal, activar_ventana, forzar_primer_plano,
+                                                    hwnd_de, ventana_activa)
+from .buscador_rapido import VentanaBuscador
 from .formulario_variables import pedir_valores
 
-CLAVE_TECLA = 'tecla_confirmacion'
-CLAVE_VELOCIDAD = 'velocidad_ms'
 
 
 class PuenteHiloPrincipal:
@@ -19,7 +19,7 @@ class PuenteHiloPrincipal:
     teclado) y necesita abrir el formulario, así que le pasa el trabajo por una cola.
     """
 
-    def __init__(self, raiz, intervalo_ms=40):
+    def __init__(self, raiz, intervalo_ms=25):
         self._raiz = raiz
         self._intervalo = intervalo_ms
         self._cola = queue.Queue()
@@ -35,6 +35,11 @@ class PuenteHiloPrincipal:
         if pedido['error'] is not None:
             raise pedido['error']
         return pedido['resultado']
+
+    def publicar(self, funcion):
+        """Pide ejecutar `funcion` en el hilo de Tkinter sin esperar (para el hilo del teclado)."""
+        if self._activo:
+            self._cola.put({'funcion': funcion, 'listo': threading.Event(), 'resultado': None, 'error': None})
 
     def _atender(self):
         try:
@@ -63,38 +68,59 @@ class PuenteHiloPrincipal:
             pedido['listo'].set()
 
 
-def _leer_configuracion(repo):
-    tecla = repo.leer_configuracion(CLAVE_TECLA, TECLA_PREDETERMINADA)
-    try:
-        velocidad = int(repo.leer_configuracion(CLAVE_VELOCIDAD, str(VELOCIDAD_PREDETERMINADA_MS)))
-    except ValueError:
-        velocidad = VELOCIDAD_PREDETERMINADA_MS
-    return tecla, velocidad
+class Expansion:
+    """La expansión por abreviatura y el buscador rápido, en marcha. Admite cambios de configuración."""
+
+    def __init__(self, escritor, teclado, puente):
+        self._escritor, self._teclado, self._puente = escritor, teclado, puente
+
+    def aplicar(self, ajustes):
+        """Aplica los ajustes al instante, sin reiniciar la aplicación."""
+        self._escritor.velocidad_ms = ajustes.velocidad_ms
+        self._teclado.configurar(ajustes.tecla_confirmacion, ajustes.atajo_buscador)
+
+    def pausar(self, pausado):
+        """Con la pantalla de configuración abierta no se vigila el teclado."""
+        self._teclado.pausado = pausado
+
+    def detener(self):
+        self._teclado.detener()
+        self._puente.detener()
 
 
 def iniciar_expansion(ventana, repo):
-    """Arranca la captura del teclado. Devuelve una función para detenerla."""
-    tecla, velocidad = _leer_configuracion(repo)
-    try:
-        escritor = EscritorTexto(velocidad)
-    except ValueError:
-        escritor = EscritorTexto()
+    """Arranca la expansión por abreviatura y el buscador rápido; devuelve el objeto Expansion."""
+    ajustes = Configuracion(repo).leer()
+    escritor = EscritorTexto(ajustes.velocidad_ms)
     puente = PuenteHiloPrincipal(ventana)
 
     def pedir(nombres, iniciales):
         return puente.llamar(lambda: pedir_valores(nombres, iniciales, parent=ventana))
 
     motor = MotorExpansion(escritor, pedir, ventana_activa, activar_ventana)
-    motor.actualizar_frases(repo.listar_frases())
-    try:
-        teclado = TecladoGlobal(motor, tecla)
-    except ValueError:
-        teclado = TecladoGlobal(motor)        # configuración inválida: se usa la tecla por defecto
+    catalogo = []
+
+    def recargar():
+        catalogo[:] = ventana.gestion.listar()        # dicts con categoría, para el buscador
+        motor.actualizar_frases(catalogo)
+
+    recargar()
+    teclado = TecladoGlobal(motor, ajustes.tecla_confirmacion, ajustes.atajo_buscador)
+
+    buscador = VentanaBuscador(
+        ventana,
+        al_elegir=lambda frase, origen: motor.insertar(frase['contenido'], origen),
+        al_cancelar=activar_ventana,
+        al_mostrar=lambda: setattr(teclado, 'pausado', True),
+        al_ocultar=lambda: setattr(teclado, 'pausado', False),
+        forzar_primer_plano=forzar_primer_plano, hwnd_de=hwnd_de)
+
+    def al_atajo():
+        """Corre en el hilo del teclado: solo anota la ventana de origen y delega en Tkinter."""
+        origen = ventana_activa()
+        puente.publicar(lambda: buscador.mostrar(list(catalogo), origen))
+
+    teclado.al_atajo = al_atajo
     teclado.iniciar()
-    ventana.al_cambiar = lambda: motor.actualizar_frases(repo.listar_frases())
-
-    def detener():
-        teclado.detener()
-        puente.detener()
-
-    return detener
+    ventana.al_cambiar = recargar
+    return Expansion(escritor, teclado, puente)

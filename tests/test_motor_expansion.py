@@ -185,3 +185,49 @@ def test_un_error_al_escribir_no_deja_el_motor_bloqueado():
         pass
     escribir(m, 'hola')
     assert m.confirmar() is True         # volvió a estar disponible
+
+
+# ---- inserción desde el buscador rápido (RF-02) ---------------------------
+
+def test_insertar_escribe_sin_borrar_y_devuelve_el_foco():
+    m, escritor, ventanas = motor()
+    assert m.insertar('Buenos días', 777) is True
+    assert escritor.llamadas == [(0, 'Buenos días')]
+    assert ventanas.activadas == [777]
+
+
+def test_insertar_con_campos_pide_el_formulario():
+    pedidos = []
+
+    def pedir(nombres, iniciales):
+        pedidos.append(nombres)
+        return {'nombre': 'Ana', 'orden': '9'}
+
+    m, escritor, ventanas = motor(pedir)
+    m.insertar('Hola {nombre}, caso {orden}', 777)
+    assert pedidos == [['nombre', 'orden']]
+    assert escritor.llamadas == [(0, 'Hola Ana, caso 9')]
+    assert ventanas.activadas == [777]
+
+
+def test_insertar_cancelado_devuelve_el_foco_pero_no_escribe():
+    m, escritor, ventanas = motor(lambda nombres, iniciales: None)
+    m.insertar('Hola {nombre}', 777)
+    assert escritor.llamadas == [] and ventanas.activadas == [777]
+
+
+def test_insertar_ocupado_rechaza_una_segunda_peticion():
+    cola = []
+    escritor, ventanas = EscritorFalso(), Ventanas()
+    m = MotorExpansion(escritor, lambda *_: None, lambda: 1, ventanas.activar, lanzar=cola.append)
+    assert m.insertar('uno', 5) is True
+    assert m.insertar('dos', 5) is False
+    cola[0]()
+    assert m.insertar('tres', 5) is True
+
+
+def test_insertar_descarta_lo_que_se_venia_escribiendo():
+    m, _, _ = motor()
+    escribir(m, 'hol')
+    m.insertar('texto', 1)
+    assert m.escrito == ''

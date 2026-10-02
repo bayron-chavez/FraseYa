@@ -73,20 +73,39 @@ class MotorExpansion:
         contenido = self._frases[abreviatura.lower()]
         self.reiniciar()
         self._ocupado = True
-        self._lanzar(lambda: self._expandir(abreviatura, contenido, ventana))
+        self._lanzar(lambda: self._insertar(contenido, ventana, len(abreviatura)))
         return True
 
-    # ---- expansión ------------------------------------------------------
-    def _expandir(self, abreviatura, contenido, ventana):
+    def insertar(self, contenido, ventana):
+        """Escribe una frase elegida a mano (buscador rápido) en `ventana`, sin borrar nada.
+
+        Devuelve False si ya hay una inserción en curso.
+        """
+        if self._ocupado:
+            return False
+        self.reiniciar()
+        self._ocupado = True
+        self._lanzar(lambda: self._insertar(contenido, ventana, 0, devolver_foco=True))
+        return True
+
+    # ---- escritura ------------------------------------------------------
+    def _insertar(self, contenido, ventana, borrar, devolver_foco=False):
+        """Resuelve los campos variables y escribe el texto en `ventana`.
+
+        borrar: caracteres a borrar antes (la abreviatura). devolver_foco: hay que
+        reactivar la ventana aunque no haya formulario (el buscador le quitó el foco).
+        """
         try:
             tiene_campos = bool(resolver_variables.detectar(contenido))
             texto = resolver_variables.resolver(contenido, self._pedir_valores)
-            if texto is None:        # canceló el formulario: la abreviatura queda como estaba
+            if texto is None:        # canceló el formulario: no se escribe ni borra nada
+                if devolver_foco and ventana:
+                    self._activar_ventana(ventana)
                 return
-            if tiene_campos and ventana:
-                self._activar_ventana(ventana)       # el formulario le quitó el foco
+            if (tiene_campos or devolver_foco) and ventana:
+                self._activar_ventana(ventana)       # el formulario o el buscador le quitaron el foco
                 time.sleep(PAUSA_TRAS_FORMULARIO_S)
-            self.escritor.reemplazar(len(abreviatura), texto)
+            self.escritor.reemplazar(borrar, texto)
         finally:
             self._ocupado = False
 

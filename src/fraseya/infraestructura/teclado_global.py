@@ -15,6 +15,8 @@ from ctypes import wintypes
 
 TECLAS_CONFIRMACION = {'tab': 0x09, 'enter': 0x0D, 'espacio': 0x20}
 TECLA_PREDETERMINADA = 'tab'
+ATAJO_PREDETERMINADO = 'ctrl+alt+espacio'
+_MODIFICADORES_ATAJO = {'ctrl': 0x11, 'alt': 0x12, 'shift': 0x10}   # win se consulta aparte
 
 _WM_KEYDOWN, _WM_KEYUP, _WM_SYSKEYDOWN, _WM_SYSKEYUP = 0x100, 0x101, 0x104, 0x105
 _LLKHF_INJECTED, _LLKHF_LOWER_IL_INJECTED = 0x10, 0x02
@@ -35,11 +37,65 @@ def _user32():
     u.GetAsyncKeyState.argtypes = [ctypes.c_int]
     u.GetKeyState.argtypes = [ctypes.c_int]
     u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    u.GetParent.argtypes = [wintypes.HWND]
+    u.GetParent.restype = wintypes.HWND
+    u.BringWindowToTop.argtypes = [wintypes.HWND]
+    u.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
     u.GetKeyboardLayout.argtypes = [wintypes.DWORD]
     u.GetKeyboardLayout.restype = wintypes.HKL
     u.ToUnicodeEx.argtypes = [wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_ubyte),
                               wintypes.LPWSTR, ctypes.c_int, wintypes.UINT, wintypes.HKL]
     return u
+
+
+def interpretar_atajo(texto):
+    """'ctrl+alt+espacio' -> (frozenset({'ctrl', 'alt'}), código de la tecla).
+
+    Exige al menos un modificador (si no, se tragaría el teclado normal) y una
+    tecla: espacio, una letra o dígito, o F1 a F12.
+    """
+    partes = [p.strip().lower() for p in (texto or '').split('+') if p.strip()]
+    if len(partes) < 2:
+        raise ValueError(f'Atajo no válido: "{texto}". Ejemplo: ctrl+alt+espacio.')
+    *modificadores, tecla = partes
+    if len(set(modificadores)) != len(modificadores) or \
+            any(m not in (*_MODIFICADORES_ATAJO, 'win') for m in modificadores):
+        raise ValueError(f'Modificadores no válidos en "{texto}". Usa ctrl, alt, shift o win.')
+    if tecla == 'espacio':
+        vk = 0x20
+    elif len(tecla) == 1 and tecla.isascii() and tecla.isalnum():
+        vk = ord(tecla.upper())
+    elif tecla.startswith('f') and tecla[1:].isdigit() and 1 <= int(tecla[1:]) <= 12:
+        vk = 0x70 + int(tecla[1:]) - 1
+    else:
+        raise ValueError(f'Tecla no válida en "{texto}". Usa espacio, una letra, un dígito o F1-F12.')
+    return frozenset(modificadores), vk
+
+
+def hwnd_de(ventana_tk):
+    """Identificador real (de nivel superior) de una ventana de Tkinter."""
+    return _user32().GetParent(ventana_tk.winfo_id()) or ventana_tk.winfo_id()
+
+
+def forzar_primer_plano(ventana):
+    """Trae una ventana nuestra al frente aunque otra aplicación tenga el foco.
+
+    Windows no deja que un proceso en segundo plano robe el foco; se evita
+    uniendo temporalmente la cola de entrada con la de la ventana activa.
+    """
+    u = _user32()
+    k = ctypes.WinDLL('kernel32')
+    activa = u.GetForegroundWindow()
+    hilo_activo = u.GetWindowThreadProcessId(activa, None) if activa else 0
+    hilo_propio = k.GetCurrentThreadId()
+    unido = bool(hilo_activo) and hilo_activo != hilo_propio and \
+        bool(u.AttachThreadInput(hilo_propio, hilo_activo, True))
+    try:
+        u.BringWindowToTop(ventana)
+        u.SetForegroundWindow(ventana)
+    finally:
+        if unido:
+            u.AttachThreadInput(hilo_propio, hilo_activo, False)
 
 
 def ventana_activa():
@@ -53,17 +109,35 @@ def activar_ventana(ventana):
 
 
 class TecladoGlobal:
-    def __init__(self, motor, tecla_confirmacion=TECLA_PREDETERMINADA):
+    def __init__(self, motor, tecla_confirmacion=TECLA_PREDETERMINADA, atajo=None, al_atajo=None):
+        """atajo: p. ej. 'ctrl+alt+espacio'; al_atajo se llama (rápido, sin bloquear) al pulsarlo."""
         if tecla_confirmacion not in TECLAS_CONFIRMACION:
             raise ValueError(f'Tecla de confirmación no válida: {tecla_confirmacion}. '
                              f'Opciones: {", ".join(TECLAS_CONFIRMACION)}.')
         self.motor = motor
         self.tecla_confirmacion = tecla_confirmacion
         self._vk_confirmacion = TECLAS_CONFIRMACION[tecla_confirmacion]
-        self._soltar_pendiente = False   # hay que tragarse también el "soltar" de la tecla
+        self._atajo = interpretar_atajo(atajo) if atajo else None
+        self.al_atajo = al_atajo
+        self.pausado = False             # con el buscador abierto no se vigila lo que se escribe
+        self._soltar = set()             # teclas cuyo "soltar" también hay que tragarse
         self._teclado = None
         self._raton = None
         self._u = None
+
+    def configurar(self, tecla_confirmacion=None, atajo=None):
+        """Cambia la tecla de confirmación y/o el atajo sin reiniciar.
+
+        Valida todo antes de aplicar nada, así un valor inválido no deja el teclado a medias.
+        """
+        if tecla_confirmacion is not None and tecla_confirmacion not in TECLAS_CONFIRMACION:
+            raise ValueError(f'Tecla de confirmación no válida: {tecla_confirmacion}.')
+        nuevo_atajo = interpretar_atajo(atajo) if atajo else None
+        if tecla_confirmacion is not None:
+            self.tecla_confirmacion = tecla_confirmacion
+            self._vk_confirmacion = TECLAS_CONFIRMACION[tecla_confirmacion]
+        if nuevo_atajo is not None:
+            self._atajo = nuevo_atajo
 
     # ---- ciclo de vida --------------------------------------------------
     def iniciar(self):
@@ -86,24 +160,50 @@ class TecladoGlobal:
         try:
             if datos.flags & (_LLKHF_INJECTED | _LLKHF_LOWER_IL_INJECTED):
                 return False
+            vk = datos.vkCode
             if mensaje in (_WM_KEYUP, _WM_SYSKEYUP):
-                if self._soltar_pendiente and datos.vkCode == self._vk_confirmacion:
-                    self._soltar_pendiente = False
+                if vk in self._soltar:
+                    self._soltar.discard(vk)
                     self._teclado.suppress_event()
                 return False
             if mensaje not in (_WM_KEYDOWN, _WM_SYSKEYDOWN):
                 return False
-            if datos.vkCode == self._vk_confirmacion:
+            if vk in self._soltar:                    # repetición automática de una tecla ya tragada
+                self._teclado.suppress_event()
+            if self._atajo and vk == self._atajo[1] and self._modificadores() == self._atajo[0]:
+                self._soltar.add(vk)
+                if not self.pausado:
+                    self._disparar_atajo()
+                self._teclado.suppress_event()
+            if self.pausado:
+                return False
+            if vk == self._vk_confirmacion:
                 if self.motor.confirmar():
-                    self._soltar_pendiente = True
+                    self._soltar.add(vk)
                     self._teclado.suppress_event()
                 return False
-            self._procesar(datos.vkCode, datos.scanCode)
+            self._procesar(vk, datos.scanCode)
         except Exception as error:
             if type(error).__name__ == 'SuppressException':
                 raise
             self.motor.reiniciar()   # ante cualquier duda, olvidar lo escrito
         return False
+
+    def _modificadores(self):
+        """Modificadores pulsados ahora: subconjunto de {'ctrl', 'alt', 'shift', 'win'}."""
+        u = self._u
+        activos = {n for n, vk in _MODIFICADORES_ATAJO.items() if u.GetAsyncKeyState(vk) & 0x8000}
+        if u.GetAsyncKeyState(_VK_LWIN) & 0x8000 or u.GetAsyncKeyState(_VK_RWIN) & 0x8000:
+            activos.add('win')
+        return frozenset(activos)
+
+    def _disparar_atajo(self):
+        self.motor.reiniciar()
+        if self.al_atajo is not None:
+            try:
+                self.al_atajo()
+            except Exception:
+                pass                        # un fallo del buscador no debe romper el hook
 
     def _procesar(self, vk, scan):
         if vk in _MODIFICADORES and vk not in (_VK_LWIN, _VK_RWIN):

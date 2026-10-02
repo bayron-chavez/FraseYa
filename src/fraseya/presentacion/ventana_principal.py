@@ -4,13 +4,16 @@ Las frases compartidas se muestran en solo lectura; para modificarlas se
 duplican. La lista usa ttk.Treeview (rápido con catálogos grandes) dentro de
 widgets de CustomTkinter.
 """
+import os
 import re
 from tkinter import messagebox, ttk
 import tkinter as tk
 
 import customtkinter as ctk
 
+from fraseya.aplicacion.configuracion import Configuracion
 from fraseya.aplicacion.gestion_frases import ErroresValidacion, GestionFrases
+from .ventana_configuracion import VentanaConfiguracion
 
 TODAS = 'Todas las categorías'
 COLOR_BLOQUEADO = '#B6BCC4'
@@ -23,6 +26,9 @@ class VentanaPrincipal(ctk.CTk):
         super().__init__()
         self.gestion = gestion
         self.al_cambiar = al_cambiar   # se llama cuando las frases cambian (para el motor de expansión)
+        self.al_configurar = None      # al_configurar(ajustes): aplica la configuración sin reiniciar
+        self.al_pausar = None          # al_pausar(bool): detiene/reanuda la captura del teclado
+        self._configuracion = None
         self._colores_boton = {}
         self.seleccion = None  # frase mostrada en el editor; None = frase nueva
         self.title('FraseYa')
@@ -50,6 +56,8 @@ class VentanaPrincipal(ctk.CTk):
                                         command=lambda _: self.refrescar())
         self.filtro.grid(row=0, column=1, padx=8)
         ctk.CTkButton(barra, text='+ Nueva frase', height=34, command=self.nueva).grid(row=0, column=2)
+        ctk.CTkButton(barra, text='⚙ Configuración', height=34, width=130, fg_color='#4B5563',
+                      hover_color='#374151', command=self.abrir_configuracion).grid(row=0, column=3, padx=(8, 0))
 
     def _construir_lista(self):
         marco = ctk.CTkFrame(self)
@@ -246,6 +254,31 @@ class VentanaPrincipal(ctk.CTk):
             self.mostrar(self.gestion.repo.obtener_frase(ident))
             self._avisar(mensaje)
 
+    def abrir_configuracion(self):
+        """Abre la pantalla de configuración (RF-11); los cambios se aplican al guardar."""
+        if self._configuracion is not None and self._configuracion.winfo_exists():
+            self._configuracion.lift()
+            return
+
+        def guardado(ajustes):
+            if self.al_configurar:
+                self.al_configurar(ajustes)
+            aviso = 'Configuración guardada y aplicada.'
+            carpeta = ajustes.carpeta_compartida
+            if carpeta and not os.path.isdir(carpeta):
+                aviso += ' La carpeta compartida no está disponible ahora; se usará la última versión sincronizada.'
+            self._avisar(aviso)
+
+        def cerrada():
+            self._configuracion = None
+            if self.al_pausar:
+                self.al_pausar(False)
+
+        if self.al_pausar:
+            self.al_pausar(True)       # escribir en la pantalla no debe expandir abreviaturas
+        self._configuracion = VentanaConfiguracion(self, Configuracion(self.gestion.repo),
+                                                   al_guardar=guardado, al_cerrar=cerrada)
+
     def _frases_cambiaron(self):
         if self.al_cambiar is not None:
             self.al_cambiar()
@@ -278,17 +311,19 @@ def abrir(ruta=None, con_teclado=True):
     from fraseya.infraestructura import RepositorioSQLite
     with RepositorioSQLite(ruta) as repo:
         ventana = VentanaPrincipal(GestionFrases(repo))
-        detener = None
+        expansion = None
         if con_teclado:
             try:
                 from .expansion import iniciar_expansion
-                detener = iniciar_expansion(ventana, repo)
+                expansion = iniciar_expansion(ventana, repo)
+                ventana.al_configurar = expansion.aplicar
+                ventana.al_pausar = expansion.pausar
             except (ImportError, OSError) as error:
                 print(f'No se pudo activar la expansión por abreviatura: {error}')
 
         def cerrar():
-            if detener:
-                detener()
+            if expansion:
+                expansion.detener()
             ventana.destroy()
 
         ventana.protocol('WM_DELETE_WINDOW', cerrar)

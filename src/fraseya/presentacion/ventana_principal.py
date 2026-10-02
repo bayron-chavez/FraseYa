@@ -18,10 +18,11 @@ _MARCADOR = re.compile(r'\{(\w+)\}')
 
 
 class VentanaPrincipal(ctk.CTk):
-    def __init__(self, gestion: GestionFrases):
+    def __init__(self, gestion: GestionFrases, al_cambiar=None):
         ctk.set_appearance_mode('light')
         super().__init__()
         self.gestion = gestion
+        self.al_cambiar = al_cambiar   # se llama cuando las frases cambian (para el motor de expansión)
         self._colores_boton = {}
         self.seleccion = None  # frase mostrada en el editor; None = frase nueva
         self.title('FraseYa')
@@ -240,15 +241,21 @@ class VentanaPrincipal(ctk.CTk):
             ok, _ = self._ejecutar(lambda: self.gestion.editar(ident, titulo, abrev, contenido, cat))
             mensaje = 'Cambios guardados.'
         if ok:
+            self._frases_cambiaron()
             self.refrescar(seleccionar=ident)
             self.mostrar(self.gestion.repo.obtener_frase(ident))
             self._avisar(mensaje)
+
+    def _frases_cambiaron(self):
+        if self.al_cambiar is not None:
+            self.al_cambiar()
 
     def duplicar(self):
         if self.seleccion is None:
             return
         ok, ident = self._ejecutar(lambda: self.gestion.duplicar(self.seleccion['id']))
         if ok:
+            self._frases_cambiaron()
             self.refrescar(seleccionar=ident)
             self.mostrar(self.gestion.repo.obtener_frase(ident))
             self._avisar('Copia creada. Ya puedes editarla.')
@@ -260,13 +267,29 @@ class VentanaPrincipal(ctk.CTk):
             return
         ok, _ = self._ejecutar(lambda: self.gestion.eliminar(self.seleccion['id']))
         if ok:
+            self._frases_cambiaron()
             self.refrescar()
             self.nueva()
             self._avisar('Frase eliminada.')
 
 
-def abrir(ruta=None):
-    """Abre la ventana principal sobre la base de datos local."""
+def abrir(ruta=None, con_teclado=True):
+    """Abre la ventana principal; con_teclado=False no captura el teclado (solo gestionar frases)."""
     from fraseya.infraestructura import RepositorioSQLite
     with RepositorioSQLite(ruta) as repo:
-        VentanaPrincipal(GestionFrases(repo)).mainloop()
+        ventana = VentanaPrincipal(GestionFrases(repo))
+        detener = None
+        if con_teclado:
+            try:
+                from .expansion import iniciar_expansion
+                detener = iniciar_expansion(ventana, repo)
+            except (ImportError, OSError) as error:
+                print(f'No se pudo activar la expansión por abreviatura: {error}')
+
+        def cerrar():
+            if detener:
+                detener()
+            ventana.destroy()
+
+        ventana.protocol('WM_DELETE_WINDOW', cerrar)
+        ventana.mainloop()

@@ -1,4 +1,4 @@
-"""Punto de entrada de FraseYa. Abre la ventana; con --consola solo verifica el arranque."""
+"""Punto de entrada de FraseYa. Abre la ventana y la expansión por abreviatura. --sin-teclado la desactiva; --consola solo verifica el arranque."""
 import sys
 from pathlib import Path
 
@@ -14,4 +14,4 @@ if __name__ == '__main__':
         sys.argv.remove('--consola')
         raise SystemExit(ejecutar(ruta_predeterminada=RUTA_BD))
     from fraseya.presentacion.ventana_principal import abrir
-    abrir(RUTA_BD)
+    abrir(RUTA_BD, con_teclado='--sin-teclado' not in sys.argv)

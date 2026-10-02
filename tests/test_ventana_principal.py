@@ -135,3 +135,13 @@ def test_contador_de_frases(ventana):
     ventana.busqueda.delete(0, 'end'); ventana.busqueda.insert(0, 'zzz')
     ventana.refrescar()
     assert ventana.contador.cget('text') == 'Mostrando 0 de 2 frases'
+
+
+def test_avisa_al_motor_cuando_las_frases_cambian(ventana):
+    avisos = []
+    ventana.al_cambiar = lambda: avisos.append(1)
+    llenar(ventana, 'A', 'a', 'x'); ventana.guardar()
+    ventana.duplicar()
+    assert len(avisos) == 2
+    ventana.nueva(); llenar(ventana, '', '', ''); ventana.guardar()   # con errores no avisa
+    assert len(avisos) == 2

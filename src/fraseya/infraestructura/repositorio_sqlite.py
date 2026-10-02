@@ -79,6 +79,11 @@ class RepositorioSQLite:
     def obtener_catalogo(self, ident):
         return self._fila('SELECT * FROM CATALOGO WHERE id=?', (ident,))
 
+    def listar_catalogos(self, origen=None):
+        if origen is None:
+            return self._filas('SELECT * FROM CATALOGO ORDER BY id')
+        return self._filas('SELECT * FROM CATALOGO WHERE origen=? ORDER BY id', (self._origen(origen),))
+
     def crear_categoria(self, catalogo_id, nombre, color='#64748B'):
         with self.db:
             return self.db.execute('INSERT INTO CATEGORIA(catalogo_id,nombre,color) VALUES(?,?,?)',

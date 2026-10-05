@@ -1,0 +1,31 @@
+{
+  "categorias": [
+    {
+      "color": "#64748B",
+      "frases": [
+        {
+          "abreviatura": "ape",
+          "contenido": "apellido",
+          "titulo": "apellido"
+        },
+        {
+          "abreviatura": "nom",
+          "contenido": "nom",
+          "titulo": "nombre"
+        },
+        {
+          "abreviatura": "fut",
+          "contenido": "apellido",
+          "titulo": "futbol"
+        },
+        {
+          "abreviatura": "futsal",
+          "contenido": "futt",
+          "titulo": "futbol"
+        }
+      ],
+      "nombre": "General"
+    }
+  ],
+  "formato": 1
+}

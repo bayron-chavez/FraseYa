@@ -16,3 +16,25 @@ coverage.xml
 .env
 work/
 outputs/
+.test-temp/
+
+# Datos y archivos exclusivos de cada equipo
+datos/
+venv/
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite3-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.log
+/prueba.txt
+/Resumen_Avance.txt
+.vscode/
+.idea/
+.codex/
+.agents/

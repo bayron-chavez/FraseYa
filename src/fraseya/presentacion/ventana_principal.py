@@ -4,7 +4,9 @@ Las frases compartidas se muestran en solo lectura; para modificarlas se
 duplican. La lista usa ttk.Treeview (rápido con catálogos grandes) dentro de
 widgets de CustomTkinter.
 """
-import os
+import queue
+from pathlib import Path
+from threading import Thread
 import re
 from tkinter import messagebox, ttk
 import tkinter as tk
@@ -21,13 +23,18 @@ _MARCADOR = re.compile(r'\{(\w+)\}')
 
 
 class VentanaPrincipal(ctk.CTk):
-    def __init__(self, gestion: GestionFrases, al_cambiar=None):
+    def __init__(self, gestion: GestionFrases, al_cambiar=None, autenticacion=None, sesion=None):
         ctk.set_appearance_mode('light')
         super().__init__()
         self.gestion = gestion
+        self.autenticacion, self.sesion = autenticacion, sesion
+        self.al_salir = None
         self.al_cambiar = al_cambiar   # se llama cuando las frases cambian (para el motor de expansión)
         self.al_configurar = None      # al_configurar(ajustes): aplica la configuración sin reiniciar
         self.al_pausar = None          # al_pausar(bool): detiene/reanuda la captura del teclado
+        self.al_sincronizar = None
+        self._publicaciones = queue.Queue()
+        self._publicando = False
         self._configuracion = None
         self._colores_boton = {}
         self.seleccion = None  # frase mostrada en el editor; None = frase nueva
@@ -42,6 +49,7 @@ class VentanaPrincipal(ctk.CTk):
         self._construir_editor()
         self.refrescar()
         self.nueva()
+        self.after(100, self._atender_publicacion)
 
     # ---- construcción -------------------------------------------------
     def _construir_barra(self):
@@ -58,6 +66,105 @@ class VentanaPrincipal(ctk.CTk):
         ctk.CTkButton(barra, text='+ Nueva frase', height=34, command=self.nueva).grid(row=0, column=2)
         ctk.CTkButton(barra, text='⚙ Configuración', height=34, width=130, fg_color='#4B5563',
                       hover_color='#374151', command=self.abrir_configuracion).grid(row=0, column=3, padx=(8, 0))
+        self.btn_sincronizar = ctk.CTkButton(barra, text='Sincronizar ahora',
+            command=lambda: self.al_sincronizar() if self.al_sincronizar else None)
+        self.btn_sincronizar.grid(row=1, column=0, sticky='w', pady=(8, 0))
+        self.estado_sync = ctk.CTkLabel(barra, text='', anchor='w', wraplength=600)
+        self.estado_sync.grid(row=1, column=1, columnspan=3, sticky='ew', padx=8)
+        self.btn_publicar = ctk.CTkButton(barra, text='Publicar catálogo…', command=self.publicar_catalogo)
+        self.btn_publicar.grid(row=2, column=0, sticky='w', pady=(6, 0))
+        self.estado_publicacion = ctk.CTkLabel(barra, text='', anchor='w', wraplength=600)
+        self.estado_publicacion.grid(row=2, column=1, columnspan=3, sticky='ew', padx=8)
+        if self.sesion:
+            ctk.CTkLabel(barra, text=f'{self.sesion.usuario} · {self.sesion.rol}').grid(row=3, column=0, sticky='w')
+            ctk.CTkButton(barra, text='Cerrar sesión', width=110,
+                command=lambda: self.al_salir() if self.al_salir else None).grid(row=4, column=0, sticky='w', pady=6)
+        if self.sesion and self.sesion.rol == 'administrador':
+            ctk.CTkButton(barra, text='Administrar usuarios', command=self.crear_cuenta).grid(row=3, column=1, pady=6)
+            ctk.CTkButton(barra, text='Eliminar del catálogo…', fg_color='#B91C1C',
+                command=self.eliminar_del_catalogo).grid(row=3, column=2, columnspan=2, pady=6)
+
+    def crear_cuenta(self):
+        from .acceso import VentanaUsuarios
+        VentanaUsuarios(self, self.autenticacion, self.sesion)
+
+    def eliminar_del_catalogo(self):
+        try:
+            if not self.autenticacion:
+                raise PermissionError('Inicia sesión como administrador para eliminar del catálogo.')
+            self.autenticacion.validar(self.sesion, administrador=True)
+        except PermissionError as error:
+            self.estado_publicacion.configure(text=str(error), text_color='#B91C1C')
+            return
+        if not self.seleccion:
+            self.estado_publicacion.configure(text='Selecciona la frase que quieres retirar del catálogo.')
+            return
+        self.publicar_catalogo(eliminar=(self.seleccion['abreviatura'],))
+
+    def publicar_catalogo(self, eliminar=()):
+        from fraseya.aplicacion.publicacion import ServicioPublicacion
+        if self._publicando:
+            return
+        carpeta = Configuracion(self.gestion.repo).leer().carpeta_compartida
+        if not carpeta:
+            self.estado_publicacion.configure(text='Configura la carpeta compartida antes de publicar.', text_color='#B91C1C')
+            return
+        autorizar = (lambda: self.autenticacion.validar(self.sesion, administrador=True)) if self.autenticacion else None
+        servicio = ServicioPublicacion(self.gestion.repo, carpeta,
+            autor=self.sesion.usuario if self.sesion else None, autorizar_eliminacion=autorizar)
+        try:
+            categorias = servicio.recoger_categorias()
+        except ValueError as error:
+            self.estado_publicacion.configure(text=str(error), text_color='#B91C1C')
+            return
+        self._publicando = True
+        self.btn_publicar.configure(state='disabled')
+        self.estado_publicacion.configure(text='Preparando vista previa…', text_color='#5B6770')
+        def preparar():
+            try:
+                self._publicaciones.put(('vista', servicio, servicio.preparar([] if eliminar else categorias, eliminar=eliminar)))
+            except Exception as error:
+                self._publicaciones.put(('error', servicio, str(error)))
+        Thread(target=preparar, daemon=True).start()
+
+    def _atender_publicacion(self):
+        try:
+            while True:
+                tipo, servicio, resultado = self._publicaciones.get_nowait()
+                if tipo == 'vista':
+                    resumen = (f'Se publicará la versión {resultado.version} con {resultado.cantidad_frases} frases '
+                        f'en {resultado.cantidad_categorias} categorías en:\n{resultado.carpeta}\n\n'
+                        f'Nuevas: {resultado.nuevas} · Modificadas: {resultado.modificadas} · Eliminadas: {resultado.eliminadas}\n\n'
+                        'Se añaden o actualizan tus frases propias. Las demás frases compartidas se conservan.')
+                    if resultado.eliminadas:
+                        resumen += f'\n\nAcción de administrador: se retirarán {resultado.eliminadas} frases de todos los equipos.'
+                    if resultado.cantidad_frases == 0:
+                        resumen += '\n\n¡El catálogo está vacío! Se eliminarán todas las frases compartidas de los equipos.'
+                    if not messagebox.askyesno('Confirmar publicación', resumen, parent=self):
+                        self.estado_publicacion.configure(text='Publicación cancelada.')
+                        self._fin_publicacion()
+                        continue
+                    self.estado_publicacion.configure(text='Publicando catálogo…')
+                    def escribir(servicio=servicio, vista=resultado):
+                        try:
+                            publicado = servicio.publicar(vista, confirmar_vacio= vista.cantidad_frases == 0)
+                            self._publicaciones.put(('publicado', servicio, publicado))
+                        except Exception as error:
+                            self._publicaciones.put(('error', servicio, str(error)))
+                    Thread(target=escribir, daemon=True).start()
+                else:
+                    mensaje = (f'Publicado: versión {resultado.version} · {resultado.fecha}'
+                               if tipo == 'publicado' else str(resultado))
+                    self.estado_publicacion.configure(text=mensaje,
+                        text_color='#15803D' if tipo == 'publicado' else '#B91C1C')
+                    self._fin_publicacion()
+        except queue.Empty:
+            pass
+        self.after(100, self._atender_publicacion)
+
+    def _fin_publicacion(self):
+        self._publicando = False
+        self.btn_publicar.configure(state='normal')
 
     def _construir_lista(self):
         marco = ctk.CTkFrame(self)
@@ -264,9 +371,6 @@ class VentanaPrincipal(ctk.CTk):
             if self.al_configurar:
                 self.al_configurar(ajustes)
             aviso = 'Configuración guardada y aplicada.'
-            carpeta = ajustes.carpeta_compartida
-            if carpeta and not os.path.isdir(carpeta):
-                aviso += ' La carpeta compartida no está disponible ahora; se usará la última versión sincronizada.'
             self._avisar(aviso)
 
         def cerrada():
@@ -306,25 +410,86 @@ class VentanaPrincipal(ctk.CTk):
             self._avisar('Frase eliminada.')
 
 
-def abrir(ruta=None, con_teclado=True):
+def abrir(ruta=None, con_teclado=True, autenticacion=None, sesion=None):
+    from fraseya.aplicacion.autenticacion import Autenticacion
+    from .acceso import VentanaAcceso
+    propia = autenticacion is None
+    if propia:
+        carpeta = Path(ruta).parent if ruta and str(ruta) != ':memory:' else Path.home() / 'FraseYa'
+        autenticacion = Autenticacion(carpeta / 'usuarios.db')
+    try:
+        if sesion is None:
+            acceso = VentanaAcceso(autenticacion)
+            acceso.mainloop()
+            sesion = acceso.sesion
+        if sesion is None:
+            return
+        autenticacion.validar(sesion)
+        _abrir_autenticado(ruta, con_teclado, autenticacion, sesion)
+    finally:
+        if sesion:
+            autenticacion.salir(sesion)
+        if propia:
+            autenticacion.cerrar()
+
+
+def _abrir_autenticado(ruta, con_teclado, autenticacion, sesion):
     """Abre la ventana principal; con_teclado=False no captura el teclado (solo gestionar frases)."""
     from fraseya.infraestructura import RepositorioSQLite
     with RepositorioSQLite(ruta) as repo:
-        ventana = VentanaPrincipal(GestionFrases(repo))
+        ventana = VentanaPrincipal(GestionFrases(repo), autenticacion=autenticacion, sesion=sesion)
         expansion = None
         if con_teclado:
             try:
                 from .expansion import iniciar_expansion
                 expansion = iniciar_expansion(ventana, repo)
-                ventana.al_configurar = expansion.aplicar
                 ventana.al_pausar = expansion.pausar
             except (ImportError, OSError) as error:
                 print(f'No se pudo activar la expansión por abreviatura: {error}')
 
+        from fraseya.aplicacion.servicio_sincronizacion import ServicioSincronizacion
+        eventos_sync = queue.Queue()
+        servicio = ServicioSincronizacion(repo, al_resultado=eventos_sync.put)
+        ajustes = Configuracion(repo).leer()
+        servicio.configurar(ajustes.carpeta_compartida, ajustes.intervalo_sincronizacion_min)
+        def configurar(ajustes):
+            servicio.configurar(ajustes.carpeta_compartida, ajustes.intervalo_sincronizacion_min)
+            if expansion:
+                expansion.aplicar(ajustes)
+        ventana.al_configurar = configurar
+        def solicitar():
+            ventana.estado_sync.configure(text='Comprobando catálogo compartido…')
+            servicio.solicitar()
+        ventana.al_sincronizar = solicitar
+        activo = True
+        def atender_sync():
+            if not activo:
+                return
+            try:
+                while True:
+                    resultado = eventos_sync.get_nowait()
+                    ventana.estado_sync.configure(text=resultado.detalle,
+                        text_color='#B91C1C' if resultado.estado == 'error' else '#15803D')
+                    if resultado.estado == 'actualizada':
+                        seleccion = ventana.seleccion
+                        ventana.refrescar()
+                        if seleccion and seleccion['origen'] == 'compartida':
+                            ventana.nueva()
+                        ventana._frases_cambiaron()
+            except queue.Empty:
+                pass
+            ventana.after(100, atender_sync)
+        ventana.after(100, atender_sync)
+        servicio.iniciar()
+
         def cerrar():
+            nonlocal activo
+            activo = False
+            servicio.detener()
             if expansion:
                 expansion.detener()
             ventana.destroy()
 
         ventana.protocol('WM_DELETE_WINDOW', cerrar)
+        ventana.al_salir = cerrar
         ventana.mainloop()

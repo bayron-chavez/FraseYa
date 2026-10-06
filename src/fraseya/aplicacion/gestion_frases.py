@@ -1,5 +1,6 @@
 """Casos de uso de RF-04: gestionar frases propias (compartidas son de solo lectura)."""
 import sqlite3
+import re
 
 CATALOGO_PROPIO = 'Mis frases'
 CATEGORIA_PREDETERMINADA = 'General'
@@ -30,7 +31,28 @@ class GestionFrases:
         if not categorias:
             self.repo.crear_categoria(catalogo_id, CATEGORIA_PREDETERMINADA)
             categorias = self.repo.listar_categorias(catalogo_id)
+        nombres = {c['nombre'].casefold() for c in categorias}
+        compartidos = {c['id'] for c in self.repo.listar_catalogos('compartida')}
+        for categoria in self.repo.listar_categorias():
+            if categoria['catalogo_id'] in compartidos and categoria['nombre'].casefold() not in nombres:
+                self.repo.crear_categoria(catalogo_id, categoria['nombre'], categoria['color'])
+                nombres.add(categoria['nombre'].casefold())
+        categorias = self.repo.listar_categorias(catalogo_id)
         return categorias
+
+    def crear_categoria(self, nombre, autenticacion, sesion, color='#64748B'):
+        """Crea una categoría del administrador para la próxima publicación."""
+        if autenticacion is None or sesion is None:
+            raise PermissionError('Inicia sesión como administrador para crear categorías.')
+        autenticacion.validar(sesion, administrador=True)
+        nombre = (nombre or '').strip()
+        if not nombre or len(nombre) > 200:
+            raise ValueError('El nombre debe tener entre 1 y 200 caracteres.')
+        if not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+            raise ValueError('El color debe tener formato #RRGGBB.')
+        if any(c['nombre'].casefold() == nombre.casefold() for c in self.categorias_propias()):
+            raise ValueError('Ya existe una categoría con ese nombre.')
+        return self.repo.crear_categoria(self._catalogo_propio(), nombre, color)
 
     def listar(self, texto='', categoria_id=None):
         """Todas las frases (propias y compartidas) con el nombre y color de su categoría."""

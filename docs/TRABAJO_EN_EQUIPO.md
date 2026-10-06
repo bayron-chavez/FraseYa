@@ -1,40 +1,13 @@
-# Trabajo de Bayron y Diego
+# Trabajo en equipo
 
-La tarjeta compartida Setup prepara el proyecto para integrar ambos trabajos.
-Esta carpeta es un repositorio Git local. Aún falta elegir y conectar el
-repositorio remoto común del equipo; no se han enviado archivos a terceros.
+Repositorio compartido: https://github.com/bayron-chavez/FraseYa.
+Mantener los cambios dentro de las capas dominio, aplicación, presentación e
+infraestructura. Ejecutar las pruebas antes de integrar o subir a main.
 
-## Responsabilidades
+Las claves públicas de Supabase no conceden permisos administrativos. Cada
+cuenta usa su sesión y las reglas del servidor. No compartir cuentas, claves
+secret, contraseñas ni bases personales por GitHub.
 
-- Bayron: persistencia SQLite, gestión de frases, categorías y sincronización.
-- Diego: entidades de dominio, expansión de texto, buscador global y otros
-  módulos asignados en Trello.
-- Ambos: acordar interfaces, integrar los módulos y revisar los cambios.
-
-## Flujo recomendado
-
-1. Utilizar el mismo repositorio remoto cuando el equipo lo acuerde.
-2. Crear una rama por tarea, por ejemplo bayron/catalogo o diego/dominio.
-3. Mantener los cambios dentro de la capa correspondiente.
-4. Ejecutar las pruebas antes de compartir un cambio.
-5. Revisar e integrar los cambios con el otro integrante.
-
-Los resultados actuales del repositorio son diccionarios. Las entidades de
-Diego pueden incorporarse mediante adaptadores, conservando el contrato de
-persistencia. No duplicar el esquema ni incluir bases personales en Git.
-
-## Estado de la tarjeta Setup
-
-- Repositorio Git local: creado en main.
-- README y .gitignore: preparados.
-- Capas presentacion, aplicacion, dominio e infraestructura: preparadas.
-- Entorno virtual: creado.
-- requirements.txt: preparado.
-- Punto de entrada main.py: implementado.
-- Instalación de dependencias: bloqueada por la red de esta sesión.
-- Ejecución de pytest: pendiente hasta instalarlo.
-
-La tarjeta debe permanecer En progreso hasta verificar pytest sin errores.
-El arranque y las pruebas pueden comprobarse con Python estándar mientras
-se resuelve esa instalación. La tarjeta no exige publicar en GitHub; el
-remoto compartido sigue siendo una decisión pendiente del equipo.
+Las migraciones SQL se aplican en orden. Una migración nueva es necesaria para
+actualizar proyectos existentes; modificar un archivo ya aplicado no cambia
+la base remota. Registrar su aplicación y comprobar auditoria_permisos.sql.

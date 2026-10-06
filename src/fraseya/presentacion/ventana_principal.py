@@ -5,6 +5,7 @@ duplican. La lista usa ttk.Treeview (rápido con catálogos grandes) dentro de
 widgets de CustomTkinter.
 """
 import queue
+import webbrowser
 from pathlib import Path
 from threading import Thread
 import re
@@ -80,20 +81,15 @@ class VentanaPrincipal(ctk.CTk):
             ctk.CTkButton(barra, text='Cerrar sesión', width=110,
                 command=lambda: self.al_salir() if self.al_salir else None).grid(row=4, column=0, sticky='w', pady=6)
         if self.sesion and self.sesion.rol == 'administrador':
-            ctk.CTkButton(barra, text='Administrar usuarios', command=self.crear_cuenta).grid(row=3, column=1, pady=6)
             ctk.CTkButton(barra, text='Eliminar del catálogo…', fg_color='#B91C1C',
                 command=self.eliminar_del_catalogo).grid(row=3, column=2, columnspan=2, pady=6)
-
-    def crear_cuenta(self):
-        from .acceso import VentanaUsuarios
-        VentanaUsuarios(self, self.autenticacion, self.sesion)
 
     def eliminar_del_catalogo(self):
         try:
             if not self.autenticacion:
                 raise PermissionError('Inicia sesión como administrador para eliminar del catálogo.')
             self.autenticacion.validar(self.sesion, administrador=True)
-        except PermissionError as error:
+        except (ValueError, PermissionError) as error:
             self.estado_publicacion.configure(text=str(error), text_color='#B91C1C')
             return
         if not self.seleccion:
@@ -102,16 +98,13 @@ class VentanaPrincipal(ctk.CTk):
         self.publicar_catalogo(eliminar=(self.seleccion['abreviatura'],))
 
     def publicar_catalogo(self, eliminar=()):
-        from fraseya.aplicacion.publicacion import ServicioPublicacion
+        from fraseya.aplicacion.publicacion_supabase import PublicacionSupabase
         if self._publicando:
             return
-        carpeta = Configuracion(self.gestion.repo).leer().carpeta_compartida
-        if not carpeta:
-            self.estado_publicacion.configure(text='Configura la carpeta compartida antes de publicar.', text_color='#B91C1C')
+        if not self.autenticacion or not self.sesion:
+            self.estado_publicacion.configure(text='Inicia sesión como administrador para publicar.', text_color='#B91C1C')
             return
-        autorizar = (lambda: self.autenticacion.validar(self.sesion, administrador=True)) if self.autenticacion else None
-        servicio = ServicioPublicacion(self.gestion.repo, carpeta,
-            autor=self.sesion.usuario if self.sesion else None, autorizar_eliminacion=autorizar)
+        servicio = PublicacionSupabase(self.gestion.repo, self.autenticacion, self.sesion)
         try:
             categorias = servicio.recoger_categorias()
         except ValueError as error:
@@ -133,7 +126,7 @@ class VentanaPrincipal(ctk.CTk):
                 tipo, servicio, resultado = self._publicaciones.get_nowait()
                 if tipo == 'vista':
                     resumen = (f'Se publicará la versión {resultado.version} con {resultado.cantidad_frases} frases '
-                        f'en {resultado.cantidad_categorias} categorías en:\n{resultado.carpeta}\n\n'
+                        f'en {resultado.cantidad_categorias} categorías en:\n{resultado.destino}\n\n'
                         f'Nuevas: {resultado.nuevas} · Modificadas: {resultado.modificadas} · Eliminadas: {resultado.eliminadas}\n\n'
                         'Se añaden o actualizan tus frases propias. Las demás frases compartidas se conservan.')
                     if resultado.eliminadas:
@@ -204,6 +197,9 @@ class VentanaPrincipal(ctk.CTk):
         ctk.CTkLabel(panel, text='Categoría', anchor='w').grid(row=5, column=0, sticky='ew', padx=16)
         self.categoria = ctk.CTkOptionMenu(panel, values=['General'])
         self.categoria.grid(row=6, column=0, sticky='ew', padx=16, pady=(0, 8))
+        if self.sesion and self.sesion.rol == 'administrador':
+            ctk.CTkButton(panel, text='+ Crear categoría', command=self.crear_categoria).grid(
+                row=5, column=0, sticky='e', padx=16)
         ctk.CTkLabel(panel, text='Contenido', anchor='w').grid(row=7, column=0, sticky='ew', padx=16)
         self.contenido = ctk.CTkTextbox(panel, height=120, wrap='word')
         self.contenido.grid(row=8, column=0, sticky='nsew', padx=16, pady=(0, 4))
@@ -231,6 +227,21 @@ class VentanaPrincipal(ctk.CTk):
         return entrada
 
     # ---- datos ---------------------------------------------------------
+    def crear_categoria(self):
+        nombre = ctk.CTkInputDialog(text='Nombre de la nueva categoría:', title='Crear categoría').get_input()
+        if nombre is None:
+            return
+        try:
+            self.gestion.crear_categoria(nombre, self.autenticacion, self.sesion)
+            self.refrescar()
+            if self.seleccion is None or self.seleccion['origen'] == 'propia':
+                self.categoria.set(nombre.strip())
+            messagebox.showinfo('Categoría creada',
+                'La categoría está disponible en este equipo. Usa «Publicar catálogo» para compartirla con los demás usuarios.',
+                parent=self)
+        except (ValueError, PermissionError) as error:
+            messagebox.showerror('No se pudo crear la categoría', str(error), parent=self)
+
     def refrescar(self, seleccionar=None):
         propias = self.gestion.categorias_propias()
         todas = self.gestion.repo.listar_categorias()
@@ -242,7 +253,9 @@ class VentanaPrincipal(ctk.CTk):
         cat_id = self._categorias_filtro.get(nombre) if nombre != TODAS else None
         self.tabla.delete(*self.tabla.get_children())
         texto = self.busqueda.get()
-        visibles = self.gestion.listar(texto, cat_id)
+        visibles = self.gestion.listar(texto)
+        if nombre != TODAS:
+            visibles = [f for f in visibles if f['categoria'] == nombre]
         for f in visibles:
             self.tabla.insert('', 'end', iid=str(f['id']), tags=(f['origen'],),
                               values=(f['abreviatura'], f['titulo'], f['categoria'], f['origen'].capitalize()))
@@ -314,7 +327,7 @@ class VentanaPrincipal(ctk.CTk):
         self.titulo.insert(0, frase['titulo'])
         self.abreviatura.insert(0, frase['abreviatura'])
         self.contenido.insert('1.0', frase['contenido'])
-        nombre = next((n for n, i in self._categorias_filtro.items() if i == frase['categoria_id']), '')
+        nombre = self.gestion.repo.obtener_categoria(frase['categoria_id'])['nombre']
         self.categoria.configure(values=list(self._categorias_propias) if propia else [nombre])
         self.categoria.set(nombre)
         self._mostrar_variables()
@@ -411,12 +424,13 @@ class VentanaPrincipal(ctk.CTk):
 
 
 def abrir(ruta=None, con_teclado=True, autenticacion=None, sesion=None):
-    from fraseya.aplicacion.autenticacion import Autenticacion
     from .acceso import VentanaAcceso
     propia = autenticacion is None
     if propia:
         carpeta = Path(ruta).parent if ruta and str(ruta) != ':memory:' else Path.home() / 'FraseYa'
-        autenticacion = Autenticacion(carpeta / 'usuarios.db')
+        from fraseya.infraestructura.supabase import cargar_cliente, AutenticacionSupabase
+        cliente = cargar_cliente(carpeta / 'supabase.json')
+        autenticacion = AutenticacionSupabase(cliente)
     try:
         if sesion is None:
             acceso = VentanaAcceso(autenticacion)
@@ -449,11 +463,16 @@ def _abrir_autenticado(ruta, con_teclado, autenticacion, sesion):
 
         from fraseya.aplicacion.servicio_sincronizacion import ServicioSincronizacion
         eventos_sync = queue.Queue()
-        servicio = ServicioSincronizacion(repo, al_resultado=eventos_sync.put)
+        from fraseya.infraestructura.supabase import RepositorioSupabase
+        ventana.estado_publicacion.configure(text='Catálogo central: Supabase')
+        if sesion.rol != 'administrador':
+            ventana.btn_publicar.configure(state='disabled')
+        servicio = ServicioSincronizacion(repo, crear_lector=lambda: RepositorioSupabase(autenticacion.cliente),
+            al_resultado=eventos_sync.put)
         ajustes = Configuracion(repo).leer()
-        servicio.configurar(ajustes.carpeta_compartida, ajustes.intervalo_sincronizacion_min)
+        servicio.configurar(ajustes.intervalo_sincronizacion_min)
         def configurar(ajustes):
-            servicio.configurar(ajustes.carpeta_compartida, ajustes.intervalo_sincronizacion_min)
+            servicio.configurar(ajustes.intervalo_sincronizacion_min)
             if expansion:
                 expansion.aplicar(ajustes)
         ventana.al_configurar = configurar

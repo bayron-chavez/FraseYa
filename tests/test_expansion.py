@@ -120,7 +120,7 @@ def test_expansion_aplica_los_ajustes_sin_reiniciar():
 
     escritor, teclado = Escritor(), Teclado()
     expansion = Expansion(escritor, teclado, puente=None)
-    expansion.aplicar(Ajustes('enter', 'ctrl+shift+k', 45, '', 15))
+    expansion.aplicar(Ajustes('enter', 'ctrl+shift+k', 45, 15))
     assert escritor.velocidad_ms == 45
     assert teclado.cambios == [('enter', 'ctrl+shift+k')]
     expansion.pausar(True)

@@ -1,7 +1,7 @@
 # Formato del catálogo compartido de FraseYa
 
-Propuesta implementada para RF-05 (lectura), RF-08 (publicación) y RF-06
-(sincronización). Formato 1. La revisión conjunta con Diego sigue pendiente.
+Contrato implementado para RF-05 (lectura), RF-08 (publicación) y RF-06
+(sincronización). Formato 1, transportado mediante Supabase.
 
 ## Archivos
 
@@ -52,21 +52,16 @@ ErrorFormato hereda de ValueError y ofrece errores, una lista de mensajes
 con rutas como categorias[2].frases[0].abreviatura. Se acumulan los errores
 de validación del documento; JSON ilegible se informa como error de archivo.
 
-## Contrato para los módulos siguientes
+## Contrato entre publicación y sincronización
 
-RF-08 debe publicar catalogo.json completo antes de escribir version.json.
-Se recomienda escribir archivos temporales y reemplazarlos. RF-05 debe leer
-version.json, después catalogo.json, comprobar el hash y leer de nuevo la
-versión para detectar una publicación concurrente. Hash distinto significa
-archivo dañado o publicación en transición: no aplicar datos parciales.
-Agregar un BOM o cambiar espacios a mano también cambia el hash; es preciso
-volver a publicar ambos archivos para actualizar los metadatos.
+Supabase guarda el texto del catálogo y sus metadatos juntos. Los nombres
+catalogo.json y version.json de los ejemplos describen el contrato de bytes;
+la aplicación no los publica en una carpeta de red.
 
-RF-05/RF-06 deben comprobar que cantidad_frases coincide con lo leído.
-RF-06 compara versiones, conserva las frases propias y actualiza SQLite de
-forma transaccional. Estos comportamientos no están implementados por el
-módulo de formato, que no accede a carpetas, red, SQLite ni interfaz.
-
+La función de publicación comprueba la versión anterior y el SHA-256 antes de
+hacer la actualización transaccional. El lector verifica el hash y la cantidad
+de frases. Un hash inválido conserva la copia local. La sincronización conserva
+las frases propias y rechaza las abreviaturas en conflicto.
 ## Verificación
 
 tests/test_formato_catalogo.py comprueba ida y vuelta con Unicode, determinismo,

@@ -38,3 +38,4 @@ venv/
 .idea/
 .codex/
 .agents/
+node_modules/

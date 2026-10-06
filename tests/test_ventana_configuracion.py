@@ -42,8 +42,7 @@ def dialogo(raiz, repo):
     eventos = {'guardados': [], 'cerrado': 0}
     d = VentanaConfiguracion(raiz, Configuracion(repo),
                              al_guardar=eventos['guardados'].append,
-                             al_cerrar=lambda: eventos.__setitem__('cerrado', eventos['cerrado'] + 1),
-                             elegir_carpeta=lambda inicial: 'D:/Compartida/Frases')
+                             al_cerrar=lambda: eventos.__setitem__('cerrado', eventos['cerrado'] + 1))
     d.withdraw()
     d.eventos = eventos
     return d
@@ -65,7 +64,7 @@ def test_muestra_los_valores_actuales(dialogo):
     assert dialogo.atajo.get() == 'ctrl+alt+espacio'
     assert dialogo.tecla.get() == 'Tab'
     assert round(dialogo.velocidad.get()) == 20
-    assert dialogo.carpeta.get() == '' and dialogo.intervalo.get() == '15'
+    assert dialogo.intervalo.get() == '15'
     assert '20 ms' in dialogo.etiqueta_velocidad.cget('text')
     dialogo.destroy()
 
@@ -75,10 +74,9 @@ def test_guardar_persiste_aplica_y_cierra(dialogo, repo):
     dialogo.tecla.set('Enter')
     dialogo.velocidad.set(35)
     dialogo._mostrar_velocidad()
-    poner(dialogo.carpeta, '\\\\servidor\\frases')
     poner(dialogo.intervalo, '10')
     dialogo.guardar()
-    esperado = Ajustes('enter', 'ctrl+shift+k', 35, '\\\\servidor\\frases', 10)
+    esperado = Ajustes('enter', 'ctrl+shift+k', 35, 10)
     assert dialogo.guardado == esperado
     assert Configuracion(repo).leer() == esperado                  # persistido
     assert dialogo.eventos['guardados'] == [esperado]               # aplicado
@@ -88,10 +86,9 @@ def test_guardar_persiste_aplica_y_cierra(dialogo, repo):
 def test_con_errores_los_muestra_todos_juntos_y_no_cierra_ni_guarda(dialogo, repo):
     poner(dialogo.atajo, 'k')
     poner(dialogo.intervalo, '0')
-    poner(dialogo.carpeta, 'C:\\a?b')
     dialogo.guardar()
     texto = dialogo.mensaje.cget('text')
-    assert texto.count('•') == 3
+    assert texto.count('•') == 2
     assert existe(dialogo) and dialogo.guardado is None and dialogo.eventos['guardados'] == []
     assert Configuracion(repo).leer() == Ajustes()
     dialogo.destroy()
@@ -107,14 +104,6 @@ def test_restablecer_carga_los_predeterminados_pero_no_guarda_hasta_pulsar_guard
     dialogo.guardar()
     assert Configuracion(repo).leer() == Ajustes()
 
-
-def test_examinar_rellena_la_carpeta_y_cancelar_el_selector_no_la_cambia(dialogo):
-    dialogo.examinar()
-    assert dialogo.carpeta.get() == 'D:\\Compartida\\Frases'
-    dialogo._elegir_carpeta = lambda inicial: ''
-    dialogo.examinar()
-    assert dialogo.carpeta.get() == 'D:\\Compartida\\Frases'
-    dialogo.destroy()
 
 
 def test_cancelar_no_guarda_nada(dialogo, repo):
@@ -163,13 +152,6 @@ def test_guardar_aplica_los_ajustes_al_motor_y_pausa_el_teclado_mientras_esta_ab
     assert pausas == [True, False]
     assert 'guardada y aplicada' in principal.mensaje.cget('text')
 
-
-def test_avisa_si_la_carpeta_compartida_no_esta_disponible(principal):
-    principal.abrir_configuracion()
-    d = principal._configuracion
-    poner(d.carpeta, 'Z:\\no\\existe\\nunca')
-    d.guardar()
-    assert 'no está disponible' in principal.mensaje.cget('text')
 
 
 def test_cancelar_tambien_reanuda_el_teclado(principal):

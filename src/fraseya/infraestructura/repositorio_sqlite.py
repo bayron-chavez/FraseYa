@@ -214,7 +214,7 @@ class RepositorioSQLite:
     def listar_sincronizaciones(self):
         return self._filas('SELECT * FROM SINCRONIZACION ORDER BY id DESC')
 
-    def reemplazar_compartidas(self, version, autor, fecha_publicacion, categorias):
+    def reemplazar_compartidas(self, version, autor, fecha_publicacion, categorias, *, origen_sync=None):
         """Reemplaza el conjunto compartido completo o no cambia nada.
 
         categorias: lista de {nombre, color, frases: [{titulo, abreviatura, contenido}]}.
@@ -236,4 +236,7 @@ class RepositorioSQLite:
                                       frase['contenido'], 'compartida')
             self.db.execute('''INSERT INTO SINCRONIZACION(estado,version_aplicada)
                 VALUES('actualizada',?)''', (version,))
+            if origen_sync is not None:
+                self.db.execute('INSERT OR REPLACE INTO CONFIGURACION(clave,valor) VALUES(?,?)',
+                    ('origen_sincronizado', origen_sync))
             return catalogo_id

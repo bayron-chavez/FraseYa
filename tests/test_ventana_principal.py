@@ -11,46 +11,6 @@ ctk = pytest.importorskip('customtkinter')
 from fraseya.presentacion import ventana_principal as vp  # noqa: E402
 
 
-def test_sincronizacion_integrada_en_hilo_de_interfaz(tmp_path, monkeypatch):
-    from fraseya.aplicacion.formato_catalogo import serializar
-    carpeta = tmp_path / 'compartida'
-    carpeta.mkdir()
-    datos, meta = serializar([{'nombre': 'Equipo', 'color': '#112233', 'frases': [
-        {'titulo': 'Nueva', 'abreviatura': 'equipo', 'contenido': 'Hola equipo'}]}],
-        1, 'Bayron', '2026-10-05T12:00:00Z')
-    (carpeta / 'catalogo.json').write_bytes(datos)
-    (carpeta / 'version.json').write_bytes(meta)
-    bd = tmp_path / 'local.db'
-    with RepositorioSQLite(bd) as repo:
-        repo.guardar_configuracion('carpeta_compartida', str(carpeta))
-    llamadas = []
-    hilo_interfaz = threading.get_ident()
-    def mainloop(v):
-        v.withdraw()
-        v.al_cambiar = lambda: llamadas.append(threading.get_ident())
-        assert v.btn_sincronizar.cget('text') == 'Sincronizar ahora'
-        v.al_sincronizar()
-        limite = time.monotonic() + 4
-        try:
-            while time.monotonic() < limite and not llamadas:
-                v.update()
-                time.sleep(0.01)
-            assert llamadas == [hilo_interfaz]
-            assert 'equipo' in filas(v)
-            assert 'versión 1' in v.estado_sync.cget('text')
-        finally:
-            # Ejecuta el manejador real de cierre, incluido detener el servicio.
-            v.tk.call(v.protocol('WM_DELETE_WINDOW'))
-    monkeypatch.setattr(vp.VentanaPrincipal, 'mainloop', mainloop)
-    from fraseya.aplicacion.autenticacion import Autenticacion
-    auth = Autenticacion(tmp_path / 'usuarios.db')
-    try:
-        auth.crear_administrador_inicial('admin', 'clave-prueba-segura')
-        sesion = auth.iniciar_sesion('admin', 'clave-prueba-segura')
-        vp.abrir(bd, con_teclado=False, autenticacion=auth, sesion=sesion)
-    finally:
-        auth.cerrar()
-
 
 @pytest.fixture
 def ventana():
@@ -80,36 +40,6 @@ def llenar(v, titulo, abrev, contenido):
 def filas(v):
     return [v.tabla.item(i, 'values')[0] for i in v.tabla.get_children()]
 
-
-def test_publicar_confirmacion_cancelar_y_escritura(ventana, tmp_path, monkeypatch):
-    from fraseya.infraestructura.repositorio_compartido import RepositorioCompartido
-    ventana.publicar_catalogo()
-    assert 'Configura la carpeta' in ventana.estado_publicacion.cget('text')
-    ventana.gestion.repo.guardar_configuracion('carpeta_compartida', str(tmp_path))
-    llenar(ventana, 'Saludo', 'hola', 'Hola equipo')
-    ventana.guardar()
-    resumenes = []
-    def cancelar(titulo, resumen, **kwargs):
-        resumenes.append(resumen)
-        return False
-    monkeypatch.setattr(vp.messagebox, 'askyesno', cancelar)
-    def esperar():
-        limite = time.monotonic() + 4
-        while ventana._publicando and time.monotonic() < limite:
-            ventana.update()
-            time.sleep(0.01)
-        assert not ventana._publicando
-    ventana.publicar_catalogo()
-    esperar()
-    assert list(tmp_path.iterdir()) == []
-    assert 'versión 1' in resumenes[0]
-    assert '1 frases' in resumenes[0]
-    assert 'Nuevas: 1' in resumenes[0]
-    monkeypatch.setattr(vp.messagebox, 'askyesno', lambda *args, **kwargs: True)
-    ventana.publicar_catalogo()
-    esperar()
-    assert 'Publicado: versión 1' in ventana.estado_publicacion.cget('text')
-    assert RepositorioCompartido(tmp_path).leer()[0].cantidad_frases == 1
 
 
 def test_crear_en_tres_pasos_y_ver_variables(ventana):
@@ -164,7 +94,7 @@ def test_compartida_es_solo_lectura_pero_se_puede_duplicar(ventana):
     assert ventana.seleccion['abreviatura'] == 'sal2'
     ventana.nueva()
     assert ventana.btn_guardar.cget('state') == 'normal'
-    assert ventana.categoria.cget('values') == ['General']
+    assert ventana.categoria.cget('values') == ['General', 'Normativa']
 
 
 def test_filtro_de_busqueda(ventana):

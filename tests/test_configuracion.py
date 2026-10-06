@@ -5,7 +5,7 @@ from fraseya.aplicacion.gestion_frases import ErroresValidacion
 from fraseya.infraestructura import RepositorioSQLite
 
 VALIDOS = {'tecla_confirmacion': 'enter', 'atajo_buscador': 'ctrl+shift+k', 'velocidad_ms': '35',
-           'carpeta_compartida': r'\\servidor\catalogo', 'intervalo_sincronizacion_min': '10'}
+           'intervalo_sincronizacion_min': '10'}
 
 
 @pytest.fixture
@@ -23,13 +23,13 @@ def test_sin_nada_guardado_se_usan_los_valores_predeterminados(config):
     assert config.leer() == Ajustes()
     a = config.leer()
     assert (a.tecla_confirmacion, a.atajo_buscador, a.velocidad_ms) == ('tab', 'ctrl+alt+espacio', 20)
-    assert a.carpeta_compartida == '' and a.intervalo_sincronizacion_min == 15
+    assert a.intervalo_sincronizacion_min == 15
 
 
 def test_guardar_y_leer_devuelve_los_valores_con_su_tipo(config):
     config.guardar(VALIDOS)
     a = config.leer()
-    assert a == Ajustes('enter', 'ctrl+shift+k', 35, r'\\servidor\catalogo', 10)
+    assert a == Ajustes('enter', 'ctrl+shift+k', 35, 10)
     assert isinstance(a.velocidad_ms, int) and isinstance(a.intervalo_sincronizacion_min, int)
 
 
@@ -58,8 +58,8 @@ def test_el_atajo_se_normaliza(config):
 def test_muestra_todos_los_errores_juntos_y_no_guarda_nada(config):
     with pytest.raises(ErroresValidacion) as e:
         config.guardar({'tecla_confirmacion': 'f13', 'atajo_buscador': 'k', 'velocidad_ms': '5',
-                        'carpeta_compartida': 'C:\\a?b', 'intervalo_sincronizacion_min': '0'})
-    assert len(e.value.errores) == 5
+                        'intervalo_sincronizacion_min': '0'})
+    assert len(e.value.errores) == 4
     assert config.leer() == Ajustes()                   # ni siquiera lo válido se guardó
 
 
@@ -79,10 +79,6 @@ def test_intervalo_invalido(config, intervalo):
     with pytest.raises(ErroresValidacion, match='intervalo'):
         config.guardar({'intervalo_sincronizacion_min': intervalo})
 
-
-def test_la_carpeta_puede_quedar_vacia_y_acepta_comillas_pegadas(config):
-    assert config.guardar({'carpeta_compartida': ''}).carpeta_compartida == ''
-    assert config.guardar({'carpeta_compartida': '"D:\\Mi carpeta"'}).carpeta_compartida == 'D:\\Mi carpeta'
 
 
 @pytest.mark.parametrize('atajo', ['ctrl+c', 'ctrl+v', 'ctrl+z', 'k', 'ctrl+', 'alt+tab'])

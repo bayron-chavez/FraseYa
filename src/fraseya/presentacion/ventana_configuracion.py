@@ -1,10 +1,8 @@
 """Pantalla de configuración (RF-11).
 
-Atajo del buscador, tecla de confirmación, velocidad de escritura y carpeta
-compartida con su intervalo de sincronización. Los valores se validan juntos,
+Atajo del buscador, tecla de confirmación, velocidad de escritura e intervalo de sincronización con Supabase. Los valores se validan juntos,
 se guardan y se aplican al instante (sin reiniciar).
 """
-from tkinter import filedialog
 
 import customtkinter as ctk
 
@@ -18,15 +16,12 @@ NOMBRE_DE_TECLA = {v: k for k, v in TECLAS.items()}
 
 
 class VentanaConfiguracion(ctk.CTkToplevel):
-    def __init__(self, parent, configuracion: Configuracion, al_guardar=None, al_cerrar=None,
-                 elegir_carpeta=None):
+    def __init__(self, parent, configuracion: Configuracion, al_guardar=None, al_cerrar=None):
         """al_guardar(ajustes) aplica los cambios; al_cerrar() se llama al cerrar la pantalla."""
         super().__init__(parent)
         self.configuracion = configuracion
         self._al_guardar = al_guardar
         self._al_cerrar = al_cerrar
-        self._elegir_carpeta = elegir_carpeta or (lambda inicial: filedialog.askdirectory(
-            parent=self, initialdir=inicial or None, title='Carpeta compartida del catálogo'))
         self.guardado = None            # Ajustes guardados, si se pulsó Guardar con éxito
         self.title('Configuración')
         self.resizable(False, False)
@@ -56,16 +51,6 @@ class VentanaConfiguracion(ctk.CTkToplevel):
         fila += 3
 
         fila = self._seccion(fila, 'Catálogo compartido')
-        ctk.CTkLabel(self, text='Carpeta compartida', anchor='w').grid(
-            row=fila, column=0, sticky='ew', padx=24, pady=(6, 0))
-        marco = ctk.CTkFrame(self, fg_color='transparent')
-        marco.grid(row=fila + 1, column=0, sticky='ew', padx=24)
-        marco.columnconfigure(0, weight=1)
-        self.carpeta = ctk.CTkEntry(marco, placeholder_text=r'Unidad de red o carpeta sincronizada, p. ej. \\servidor\frases')
-        self.carpeta.grid(row=0, column=0, sticky='ew')
-        ctk.CTkButton(marco, text='Examinar…', width=90, fg_color='#4B5563', hover_color='#374151',
-                      command=self.examinar).grid(row=0, column=1, padx=(8, 0))
-        fila += 2
         self.intervalo = self._campo(fila, f'Revisar actualizaciones cada (minutos, {INTERVALO_MIN}–{INTERVALO_MAX})',
                                      'Cada cuánto se comprueba si hay una versión nueva del catálogo.')
         fila += 3
@@ -162,14 +147,12 @@ class VentanaConfiguracion(ctk.CTkToplevel):
         self.tecla.set(NOMBRE_DE_TECLA[ajustes.tecla_confirmacion])
         self.velocidad.set(ajustes.velocidad_ms)
         self._mostrar_velocidad()
-        self._poner(self.carpeta, ajustes.carpeta_compartida)
         self._poner(self.intervalo, str(ajustes.intervalo_sincronizacion_min))
 
     def valores(self):
         return {'atajo_buscador': self.atajo.get(),
                 'tecla_confirmacion': TECLAS.get(self.tecla.get(), ''),
                 'velocidad_ms': str(int(round(self.velocidad.get()))),
-                'carpeta_compartida': self.carpeta.get(),
                 'intervalo_sincronizacion_min': self.intervalo.get()}
 
     def _mostrar_velocidad(self):
@@ -177,11 +160,6 @@ class VentanaConfiguracion(ctk.CTkToplevel):
             text=f'Velocidad de escritura: {int(round(self.velocidad.get()))} ms por carácter')
 
     # ---- acciones -------------------------------------------------------
-    def examinar(self):
-        carpeta = self._elegir_carpeta(self.carpeta.get().strip())
-        if carpeta:
-            self._poner(self.carpeta, carpeta.replace('/', '\\'))
-
     def restablecer(self):
         """Muestra los valores predeterminados; solo se guardan al pulsar Guardar."""
         from fraseya.aplicacion.configuracion import Ajustes

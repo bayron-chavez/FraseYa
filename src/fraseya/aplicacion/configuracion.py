@@ -1,4 +1,4 @@
-"""RF-11: ajustes del usuario (atajo, tecla de confirmación, velocidad, carpeta compartida).
+"""RF-11: ajustes del usuario (atajo, tecla de confirmación, velocidad, sincronización).
 
 Se guardan como clave/valor en la tabla CONFIGURACION. Un valor inválido o
 ausente se reemplaza por el predeterminado al leer, y al guardar se informan
@@ -36,7 +36,6 @@ class Ajustes:
     tecla_confirmacion: str = TECLA_PREDETERMINADA
     atajo_buscador: str = ATAJO_PREDETERMINADO
     velocidad_ms: int = VELOCIDAD_PREDETERMINADA_MS
-    carpeta_compartida: str = ''
     intervalo_sincronizacion_min: int = INTERVALO_PREDETERMINADO
 
 
@@ -127,13 +126,6 @@ class Configuracion:
                                f'{VELOCIDAD_MAX_MS} ms por carácter.')
             else:
                 nuevos['velocidad_ms'] = velocidad
-
-        if 'carpeta_compartida' in valores:
-            carpeta = str(valores['carpeta_compartida']).strip().strip('"')
-            if any(c in carpeta for c in '<>"|?*\n\r\t'):
-                errores.append('La ruta de la carpeta compartida tiene caracteres no válidos.')
-            else:
-                nuevos['carpeta_compartida'] = carpeta
 
         if 'intervalo_sincronizacion_min' in valores:
             intervalo = self._entero(valores['intervalo_sincronizacion_min'])

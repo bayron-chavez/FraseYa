@@ -4,7 +4,6 @@ from threading import Event, Lock, Thread
 import sqlite3
 
 from fraseya.dominio.entidades import VersionCatalogo
-from fraseya.infraestructura.repositorio_compartido import RepositorioCompartido
 from fraseya.infraestructura.repositorio_sqlite import RepositorioSQLite
 
 
@@ -16,11 +15,10 @@ class ResultadoSincronizacion:
 
 
 class ServicioSincronizacion:
-    def __init__(self, repositorio, crear_repositorio_compartido=RepositorioCompartido,
+    def __init__(self, repositorio, crear_lector,
                  al_actualizar=None, al_resultado=None, crear_repositorio_local=None,
                  esperar=None):
         self.repo = repositorio
-        self._crear_compartido = crear_repositorio_compartido
         self._al_actualizar = al_actualizar
         self._al_resultado = al_resultado
         ruta = repositorio.db.execute('PRAGMA database_list').fetchone()[2]
@@ -33,17 +31,14 @@ class ServicioSincronizacion:
         self._esperar = esperar or self._despertar.wait
         self._hilo = None
         self._generacion = 0
-        self._carpeta = repositorio.leer_configuracion('carpeta_compartida', '')
         self._intervalo = 15
-        self._lector = crear_repositorio_compartido(self._carpeta)
+        self._lector = crear_lector()
 
-    def configurar(self, carpeta, intervalo):
+    def configurar(self, intervalo):
         if type(intervalo) is not int or not 1 <= intervalo <= 1440:
             raise ValueError('El intervalo debe estar entre 1 y 1440 minutos.')
         with self._config:
-            if carpeta != self._carpeta:
-                self._lector = self._crear_compartido(carpeta)
-            self._carpeta, self._intervalo = carpeta, intervalo
+            self._intervalo = intervalo
             self._generacion += 1
         self._despertar.set()
 
@@ -56,7 +51,12 @@ class ServicioSincronizacion:
         try:
             with self._config:
                 lector, generacion = self._lector, self._generacion
+                origen = lector.identificador
             instalada = max((c['version'] for c in repo.listar_catalogos('compartida')), default=0)
+            anterior_origen = repo.leer_configuracion('origen_sincronizado', '')
+            if (anterior_origen and anterior_origen != origen) or (
+                    not anterior_origen and origen.startswith('supabase:')):
+                instalada = 0  # Las versiones de dos orígenes distintos no son comparables.
             try:
                 publicada = lector.leer_version()
                 if publicada is None:
@@ -74,7 +74,8 @@ class ServicioSincronizacion:
                             resultado = ResultadoSincronizacion('sin_cambios', instalada, 'La versión leída no es posterior a la instalada.')
                         else:
                             categorias = self._resolver_conflictos(repo, categorias)
-                            repo.reemplazar_compartidas(version.version, version.autor, version.fecha, categorias)
+                            repo.reemplazar_compartidas(version.version, version.autor, version.fecha, categorias,
+                                origen_sync=origen)
                             resultado = ResultadoSincronizacion('actualizada', version.version,
                                 f'Actualizado a la versión {version.version}.')
                             actualizado = True

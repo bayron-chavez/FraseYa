@@ -14,4 +14,9 @@ if __name__ == '__main__':
         sys.argv.remove('--consola')
         raise SystemExit(ejecutar(ruta_predeterminada=RUTA_BD))
     from fraseya.presentacion.ventana_principal import abrir
-    abrir(RUTA_BD, con_teclado='--sin-teclado' not in sys.argv)
+    from fraseya.infraestructura.supabase import ErrorSupabase
+    try:
+        abrir(RUTA_BD, con_teclado='--sin-teclado' not in sys.argv)
+    except ErrorSupabase as error:
+        print(str(error))
+        raise SystemExit(1) from None

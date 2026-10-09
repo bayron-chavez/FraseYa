@@ -2,7 +2,9 @@
 # Se elige pynput como alternativa a keyboard; no se requieren ambas.
 pynput>=1.7,<2
 customtkinter>=5.2,<6
+pystray>=0.19.5,<0.20
 openpyxl>=3.1,<4
+defusedxml>=0.7.1,<0.8
 pytest>=8,<10
 pytest-cov>=5,<8
 pyinstaller>=6,<7

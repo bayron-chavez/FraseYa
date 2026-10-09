@@ -11,6 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
 from fraseya.aplicacion.sesion import Sesion
+from fraseya.aplicacion.limite_acceso import LimiteAcceso
 from fraseya.aplicacion.formato_catalogo import (
     MAX_BYTES, leer_catalogo, leer_version, verificar_integridad)
 
@@ -70,6 +71,7 @@ class ClienteSupabase:
         self._access = self._refresh = None
         self._vence = 0
         self._abrir = build_opener(SinRedirecciones()).open
+        self.limite_acceso = LimiteAcceso()
 
     def _http(self, metodo, ruta, cuerpo, headers):
         solicitud = Request(self.url + ruta, data=cuerpo, headers=headers, method=metodo)
@@ -129,11 +131,23 @@ class ClienteSupabase:
             raise ErrorSupabase('Respuesta de sesión inválida.') from None
 
     def entrar(self, correo, clave):
-        respuesta = self.solicitar('POST', '/auth/v1/token?grant_type=password',
-            {'email': correo.strip(), 'password': clave}, autenticado=False)
-        self._guardar_tokens(respuesta)
+        self.limpiar()
+        if (not isinstance(correo, str) or not isinstance(clave, str)
+                or not correo.strip() or len(correo) > 254 or not clave or len(clave) > 1024):
+            raise ErrorSupabase('Introduce un correo y una contraseña válidos.')
+        self.limite_acceso.reservar()
         try:
+            respuesta = self.solicitar('POST', '/auth/v1/token?grant_type=password',
+                {'email': correo.strip(), 'password': clave}, autenticado=False)
+            self._guardar_tokens(respuesta)
             return self.perfil()
+        except ErrorSupabase as error:
+            self.limpiar()
+            if error.estado == 429:
+                self.limite_acceso.bloquear()
+            if error.estado in (400, 401):
+                raise ErrorSupabase('Correo o contraseña incorrectos.', error.estado) from None
+            raise
         except Exception:
             self.limpiar()
             raise
@@ -160,6 +174,9 @@ class AutenticacionSupabase:
         self._cerrada = False
 
     def iniciar_sesion(self, nombre, clave):
+        if self._cerrada:
+            raise ErrorSupabase('La ventana de acceso se cerró.')
+        self._sesion = None
         perfil = self.cliente.entrar(nombre, clave)
         if self._cerrada:
             self.cliente.limpiar()

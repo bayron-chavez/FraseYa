@@ -52,6 +52,68 @@ def test_crear_en_tres_pasos_y_ver_variables(ventana):
     assert ventana.estado.cget('text') == 'Frase propia'
 
 
+def test_menu_variable_inserta_en_cursor_y_guarda(ventana, monkeypatch):
+    monkeypatch.setattr(ventana, '_elegir_variable_repetida', lambda _: 'misma')
+    llenar(ventana, 'Cobro', '!cobro', 'Hola , total ')
+    ventana.contenido.mark_set('insert', '1.5')
+    ventana._insertar_variable('Nombre')
+    assert ventana.contenido.get('1.0', 'end-1c') == 'Hola {nombre}, total '
+    ventana.contenido.mark_set('insert', 'end-1c')
+    ventana._insertar_variable('Monto')
+    ventana._insertar_variable('Monto')
+    assert ventana.menu_variables.get() == 'Insertar variable…'
+    assert '{nombre}, {monto}' in ventana.variables.cget('text')
+    ventana.guardar()
+    assert ventana.gestion.listar()[0]['contenido'] == 'Hola {nombre}, total {monto}{monto}'
+
+
+def test_menu_variable_respeta_solo_lectura(ventana):
+    ventana.contenido.insert('1.0', 'Compartida {fecha}')
+    ventana._modo_edicion(False)
+    assert ventana.menu_variables.cget('state') == 'disabled'
+    ventana._insertar_variable('Nombre')
+    assert ventana.contenido.get('1.0', 'end-1c') == 'Compartida {fecha}'
+    ventana.nueva()
+    assert ventana.menu_variables.cget('state') == 'normal'
+
+
+def test_variable_distinta_no_colisiona_y_resuelve_separada(ventana, monkeypatch):
+    from fraseya.aplicacion.resolver_variables import resolver
+    monkeypatch.setattr(ventana, '_elegir_variable_repetida', lambda _: 'otra')
+    llenar(ventana, 'Saludo', '!saludo', '{nombre} saluda a {nombre_2}: ')
+    ventana.contenido.mark_set('insert', 'end-1c')
+    ventana._insertar_variable('Nombre')
+    texto = ventana.contenido.get('1.0', 'end-1c')
+    assert texto == '{nombre} saluda a {nombre_2}: {nombre_3}'
+    assert resolver(texto, lambda *_: {
+        'nombre': 'Ana', 'nombre_2': 'Luis', 'nombre_3': 'Eva',
+    }) == 'Ana saluda a Luis: Eva'
+
+
+def test_cancelar_variable_repetida_conserva_contenido(ventana, monkeypatch):
+    monkeypatch.setattr(ventana, '_elegir_variable_repetida', lambda _: None)
+    ventana.contenido.insert('1.0', 'Hola {nombre}')
+    ventana._insertar_variable('Nombre')
+    assert ventana.contenido.get('1.0', 'end-1c') == 'Hola {nombre}'
+
+
+def test_dialogo_repetida_tiene_eleccion_clara(ventana):
+    ventana.deiconify()
+    ventana.update()
+
+    def elegir():
+        for dialogo in ventana.winfo_children():
+            if isinstance(dialogo, ctk.CTkToplevel):
+                for boton in dialogo.winfo_children():
+                    if isinstance(boton, ctk.CTkButton) and boton.cget('text') == 'Agregar otro valor':
+                        boton.invoke()
+                        return
+        ventana.after(50, elegir)
+
+    ventana.after(200, elegir)
+    assert ventana._elegir_variable_repetida('Nombre') == 'otra'
+
+
 def test_abreviatura_repetida_muestra_error_y_no_guarda(ventana):
     llenar(ventana, 'A', 'hola', 'x'); ventana.guardar()
     ventana.nueva()
@@ -77,6 +139,24 @@ def test_eliminar_cancelado_no_borra(ventana, monkeypatch):
     monkeypatch.setattr(vp.messagebox, 'askyesno', lambda *a, **k: False)
     ventana.eliminar()
     assert filas(ventana) == ['a']
+
+
+def test_favoritas_filtro_y_deshacer_en_interfaz(ventana, monkeypatch):
+    llenar(ventana, 'A', '!a', 'Hola {nombre}')
+    ventana.guardar()
+    ventana.alternar_favorita()
+    assert ventana.btn_favorita.cget('text') == '★ Quitar de favoritas'
+    ventana.solo_favoritas.select()
+    ventana.refrescar()
+    assert filas(ventana) == ['!a']
+    monkeypatch.setattr(vp.messagebox, 'askyesno', lambda *a, **k: True)
+    ventana.eliminar()
+    assert filas(ventana) == []
+    assert ventana.btn_deshacer.cget('state') == 'normal'
+    ventana.deshacer_eliminacion()
+    assert filas(ventana) == ['!a']
+    assert ventana.contenido.get('1.0', 'end-1c') == 'Hola {nombre}'
+    assert ventana.btn_deshacer.cget('state') == 'disabled'
 
 
 def test_compartida_es_solo_lectura_pero_se_puede_duplicar(ventana):

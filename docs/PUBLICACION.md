@@ -1,6 +1,10 @@
 # Publicación del catálogo
 
 El administrador puede usar «Crear categoría» junto al selector del editor.
+La interfaz actual agrupa estas acciones en «Gestionar categorías», incluyendo
+renombrar, asignar color y eliminar categorías vacías. Los renombrados conservan
+las frases de la categoría remota. Eliminar se rechaza si hay frases locales
+o si la categoría remota contiene frases al preparar la publicación.
 Después debe usar «Publicar catálogo» para compartirla. Se publican también
 las categorías sin frases. Los demás usuarios reciben las categorías al
 sincronizar y pueden seleccionarlas para guardar sus frases propias.

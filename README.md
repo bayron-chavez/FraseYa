@@ -34,6 +34,17 @@ comparten el mismo perfil de Windows.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
+También puedes usar el portable de `dist/FraseYa-portable.zip`, que incluye un
+asistente de configuración inicial y no necesita Python. Consulta
+[MANUAL_USUARIO.md](docs/MANUAL_USUARIO.md),
+[GUIA_ADMINISTRADOR.md](docs/GUIA_ADMINISTRADOR.md) y
+[VALIDACION.md](docs/VALIDACION.md). Para regenerarlo: `scripts/empaquetar.ps1`.
+
+La interfaz permite crear/renombrar/eliminar categorías vacías y asignarles
+color (solo administradores), importar Excel e identificar el estado de
+sincronización en la ventana y en la bandeja. El login limita peticiones locales
+y respeta las respuestas HTTP 429 del servidor.
+
 Las pruebas gráficas requieren un escritorio Windows. La auditoría PostgreSQL
 se ejecuta en una base aislada con PGlite:
 

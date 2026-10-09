@@ -67,3 +67,29 @@ def test_valores_iniciales_prellenan_el_campo(raiz):
     assert f.entradas['fecha'].get() == '02/10/2026'
     assert f.entradas['nombre'].get() == ''
     f.destroy()
+
+
+def test_vista_previa_actualiza_y_resalta_todas_las_apariciones(raiz):
+    f = FormularioVariables(raiz, ['nombre', 'nombre_2'], contenido=
+                           'Hola {nombre}, te atiende {nombre_2}. Gracias {nombre}.')
+    f.withdraw()
+    assert '[Nombre 2]' in f.vista_previa.get('1.0', 'end-1c')
+    f.entradas['nombre'].insert(0, 'Ana')
+    f.entradas['nombre_2'].insert(0, 'Luis')
+    assert f.vista_previa.get('1.0', 'end-1c') == 'Hola Ana, te atiende Luis. Gracias Ana.'
+    assert len(f.vista_previa.tag_ranges('activo')) == 4
+    f._resaltar_variable('nombre_2')
+    rangos = f.vista_previa.tag_ranges('activo')
+    assert len(rangos) == 2
+    assert f.vista_previa.get(*rangos) == 'Luis'
+    f.destroy()
+
+
+def test_vista_previa_no_reinterpreta_llaves_del_valor(raiz):
+    f = FormularioVariables(raiz, ['nombre', 'monto'], contenido='{nombre}\n{monto}')
+    f.withdraw()
+    f.entradas['nombre'].insert(0, '{monto}')
+    f.entradas['monto'].insert(0, '10')
+    assert f.vista_previa.get('1.0', 'end-1c') == '{monto}\n10'
+    f.cancelar()
+    assert f.resultado is None

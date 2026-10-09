@@ -50,5 +50,5 @@ def buscar(frases, consulta, limite=100):
         titulo = campos[1]
         bono = -3 if titulo == completa else (-1 if titulo.startswith(completa) else 0)
         resultado.append((sum(pesos) + (bono if palabras else 0), titulo, frase))
-    resultado.sort(key=lambda r: (r[0], r[1]))
+    resultado.sort(key=lambda r: (not r[2].get('favorita', False), r[0], r[1]))
     return [r[2] for r in resultado[:limite]]

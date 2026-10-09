@@ -9,7 +9,7 @@ import webbrowser
 from pathlib import Path
 from threading import Thread
 import re
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, colorchooser, filedialog
 import tkinter as tk
 
 import customtkinter as ctk
@@ -70,6 +70,12 @@ class VentanaPrincipal(ctk.CTk):
         self.btn_sincronizar = ctk.CTkButton(barra, text='Sincronizar ahora',
             command=lambda: self.al_sincronizar() if self.al_sincronizar else None)
         self.btn_sincronizar.grid(row=1, column=0, sticky='w', pady=(8, 0))
+        ctk.CTkButton(barra, text='Importar Excel…', command=self.importar_excel).grid(row=4, column=1, pady=6)
+        self.solo_favoritas = ctk.CTkCheckBox(barra, text='Solo favoritas', command=self.refrescar)
+        self.solo_favoritas.grid(row=5, column=0, sticky='w', pady=(4, 0))
+        self.btn_deshacer = ctk.CTkButton(barra, text='Deshacer eliminación',
+                                         command=self.deshacer_eliminacion, state='disabled')
+        self.btn_deshacer.grid(row=5, column=1, padx=8, pady=(4, 0))
         self.estado_sync = ctk.CTkLabel(barra, text='', anchor='w', wraplength=600)
         self.estado_sync.grid(row=1, column=1, columnspan=3, sticky='ew', padx=8)
         self.btn_publicar = ctk.CTkButton(barra, text='Publicar catálogo…', command=self.publicar_catalogo)
@@ -107,6 +113,7 @@ class VentanaPrincipal(ctk.CTk):
         servicio = PublicacionSupabase(self.gestion.repo, self.autenticacion, self.sesion)
         try:
             categorias = servicio.recoger_categorias()
+            operaciones = self.gestion.operaciones_categorias()
         except ValueError as error:
             self.estado_publicacion.configure(text=str(error), text_color='#B91C1C')
             return
@@ -115,7 +122,8 @@ class VentanaPrincipal(ctk.CTk):
         self.estado_publicacion.configure(text='Preparando vista previa…', text_color='#5B6770')
         def preparar():
             try:
-                self._publicaciones.put(('vista', servicio, servicio.preparar([] if eliminar else categorias, eliminar=eliminar)))
+                self._publicaciones.put(('vista', servicio, servicio.preparar([] if eliminar else categorias,
+                    eliminar=eliminar, operaciones_categorias=operaciones)))
             except Exception as error:
                 self._publicaciones.put(('error', servicio, str(error)))
         Thread(target=preparar, daemon=True).start()
@@ -198,14 +206,28 @@ class VentanaPrincipal(ctk.CTk):
         self.categoria = ctk.CTkOptionMenu(panel, values=['General'])
         self.categoria.grid(row=6, column=0, sticky='ew', padx=16, pady=(0, 8))
         if self.sesion and self.sesion.rol == 'administrador':
-            ctk.CTkButton(panel, text='+ Crear categoría', command=self.crear_categoria).grid(
+            ctk.CTkButton(panel, text='Gestionar categorías', command=self.gestionar_categorias).grid(
                 row=5, column=0, sticky='e', padx=16)
-        ctk.CTkLabel(panel, text='Contenido', anchor='w').grid(row=7, column=0, sticky='ew', padx=16)
+        cabecera = ctk.CTkFrame(panel, fg_color='transparent')
+        cabecera.grid(row=7, column=0, sticky='ew', padx=16, pady=(0, 4))
+        ctk.CTkLabel(cabecera, text='Contenido', anchor='w').pack(side='left')
+        self._opciones_variables = {
+            'Nombre': 'nombre', 'Monto': 'monto', 'Fecha': 'fecha',
+            'Correo': 'correo', 'Teléfono': 'telefono', 'Dirección': 'direccion',
+            'Empresa': 'empresa', 'Número de orden': 'orden',
+        }
+        self.menu_variables = ctk.CTkOptionMenu(
+            cabecera, values=list(self._opciones_variables),
+            command=self._insertar_variable, width=160)
+        self.menu_variables.set('Insertar variable…')
+        self.menu_variables.pack(side='right')
         self.contenido = ctk.CTkTextbox(panel, height=120, wrap='word')
         self.contenido.grid(row=8, column=0, sticky='nsew', padx=16, pady=(0, 4))
         self.contenido.bind('<KeyRelease>', lambda _: self._mostrar_variables())
         self.variables = ctk.CTkLabel(panel, text='', anchor='w', text_color='#5B6770')
         self.variables.grid(row=9, column=0, sticky='ew', padx=16)
+        self.btn_favorita = ctk.CTkButton(panel, text='☆ Marcar favorita', command=self.alternar_favorita)
+        self.btn_favorita.grid(row=12, column=0, sticky='w', padx=16, pady=(0, 12))
         botones = ctk.CTkFrame(panel, fg_color='transparent')
         botones.grid(row=10, column=0, sticky='ew', padx=16, pady=(8, 4))
         self.btn_guardar = ctk.CTkButton(botones, text='Guardar', width=90, command=self.guardar)
@@ -242,6 +264,70 @@ class VentanaPrincipal(ctk.CTk):
         except (ValueError, PermissionError) as error:
             messagebox.showerror('No se pudo crear la categoría', str(error), parent=self)
 
+    def gestionar_categorias(self):
+        dialogo = ctk.CTkToplevel(self)
+        dialogo.title('Categorías — administrador')
+        dialogo.geometry('420x320')
+        dialogo.transient(self)
+        categorias = {c['nombre']: c for c in self.gestion.categorias_propias()}
+        selector = ctk.CTkOptionMenu(dialogo, values=list(categorias))
+        selector.pack(pady=12)
+        nombre = ctk.CTkEntry(dialogo, placeholder_text='Nombre de la categoría', width=300)
+        nombre.pack(pady=8)
+        color = tk.StringVar(value='#64748B')
+        def cargar(valor):
+            nombre.delete(0, 'end')
+            nombre.insert(0, valor)
+            color.set(categorias[valor]['color'])
+        selector.configure(command=cargar)
+        cargar(selector.get())
+        def elegir_color():
+            elegido = colorchooser.askcolor(color.get(), parent=dialogo, title='Color de categoría')[1]
+            if elegido:
+                color.set(elegido)
+        ctk.CTkButton(dialogo, text='Elegir color', command=elegir_color).pack(pady=8)
+        ctk.CTkLabel(dialogo, textvariable=color).pack()
+        def guardar(accion):
+            try:
+                if accion == 'crear':
+                    self.gestion.crear_categoria(nombre.get(), self.autenticacion, self.sesion, color.get())
+                else:
+                    self.gestion.editar_categoria(categorias[selector.get()]['id'], nombre.get(), color.get(),
+                        self.autenticacion, self.sesion, eliminar=accion == 'eliminar')
+                self.refrescar()
+                self.nueva()
+                dialogo.destroy()
+                messagebox.showinfo('Categorías', 'Cambios guardados. Publica el catálogo para compartirlos.', parent=self)
+            except (ValueError, PermissionError) as error:
+                messagebox.showerror('Categorías', str(error), parent=dialogo)
+        botones = ctk.CTkFrame(dialogo)
+        botones.pack(pady=12)
+        for columna, (texto, accion) in enumerate([('Crear', 'crear'), ('Guardar', 'editar'), ('Eliminar', 'eliminar')]):
+            ctk.CTkButton(botones, text=texto, width=110, command=lambda a=accion: guardar(a)).grid(row=0, column=columna, padx=3)
+
+    def importar_excel(self):
+        ruta = filedialog.askopenfilename(parent=self, title='Importar frases', filetypes=[('Excel', '*.xlsx')])
+        if not ruta:
+            return
+        try:
+            from fraseya.aplicacion.importacion_excel import importar_excel
+            resultado = importar_excel(ruta, self.gestion, self.autenticacion, self.sesion)
+            self.refrescar()
+            self.nueva()
+            self._frases_cambiaron()
+            detalle = '\n'.join(f'Fila {n}: {motivo}' for n, motivo in resultado.rechazadas)
+            informe = ctk.CTkToplevel(self)
+            informe.title('Resultado de importación')
+            informe.geometry('650x400')
+            informe.transient(self)
+            ctk.CTkLabel(informe, text=f'Importadas: {resultado.importadas} · Rechazadas: {len(resultado.rechazadas)}').pack(pady=12)
+            texto = ctk.CTkTextbox(informe)
+            texto.pack(fill='both', expand=True, padx=12, pady=12)
+            texto.insert('1.0', detalle or 'Todas las filas se importaron correctamente.')
+            texto.configure(state='disabled')
+        except Exception:
+            messagebox.showerror('Importación', 'No se pudo importar. Revisa el formato, el tamaño y las columnas del archivo.', parent=self)
+
     def refrescar(self, seleccionar=None):
         propias = self.gestion.categorias_propias()
         todas = self.gestion.repo.listar_categorias()
@@ -254,13 +340,18 @@ class VentanaPrincipal(ctk.CTk):
         self.tabla.delete(*self.tabla.get_children())
         texto = self.busqueda.get()
         visibles = self.gestion.listar(texto)
+        if self.solo_favoritas.get():
+            visibles = [f for f in visibles if f['favorita']]
         if nombre != TODAS:
             visibles = [f for f in visibles if f['categoria'] == nombre]
         for f in visibles:
-            self.tabla.insert('', 'end', iid=str(f['id']), tags=(f['origen'],),
-                              values=(f['abreviatura'], f['titulo'], f['categoria'], f['origen'].capitalize()))
-        total = self.gestion.listar() if (texto.strip() or cat_id is not None) else visibles
+            etiqueta = 'categoria_' + f['color']
+            self.tabla.tag_configure(etiqueta, foreground=f['color'])
+            self.tabla.insert('', 'end', iid=str(f['id']), tags=(etiqueta, f['origen']),
+                              values=(f['abreviatura'], ('★ ' if f['favorita'] else '') + f['titulo'], f['categoria'], f['origen'].capitalize()))
+        total = self.gestion.listar() if (texto.strip() or cat_id is not None or self.solo_favoritas.get()) else visibles
         self.contador.configure(text=self._texto_contador(len(visibles), total))
+        self.btn_deshacer.configure(state='normal' if self.gestion.puede_deshacer() else 'disabled')
         if seleccionar is not None and self.tabla.exists(str(seleccionar)):
             self.tabla.selection_set(str(seleccionar))
 
@@ -289,6 +380,7 @@ class VentanaPrincipal(ctk.CTk):
         for w in (self.titulo, self.abreviatura, self.contenido):
             w.configure(state=estado)
         self.categoria.configure(state=estado)
+        self.menu_variables.configure(state=estado)
         self._activar(self.btn_guardar, editable)
         self._activar(self.btn_eliminar, editable)
 
@@ -309,6 +401,7 @@ class VentanaPrincipal(ctk.CTk):
 
     def nueva(self):
         self.seleccion = None
+        self.btn_favorita.configure(state='disabled', text='☆ Marcar favorita')
         self.tabla.selection_remove(*self.tabla.selection())
         self._limpiar_editor()
         self.categoria.configure(values=list(self._categorias_propias))
@@ -322,6 +415,8 @@ class VentanaPrincipal(ctk.CTk):
 
     def mostrar(self, frase):
         self.seleccion = frase
+        favorita = self.gestion.es_favorita(frase)
+        self.btn_favorita.configure(state='normal', text='★ Quitar de favoritas' if favorita else '☆ Marcar favorita')
         propia = frase['origen'] == 'propia'
         self._limpiar_editor()
         self.titulo.insert(0, frase['titulo'])
@@ -336,10 +431,64 @@ class VentanaPrincipal(ctk.CTk):
         self._activar(self.btn_duplicar, True)
         self._avisar('')
 
+    def _insertar_variable(self, opcion):
+        self.menu_variables.set('Insertar variable…')
+        if self.menu_variables.cget('state') == 'disabled':
+            return
+        nombre = self._opciones_variables.get(opcion)
+        if nombre is None:
+            return
+        existentes = set(_MARCADOR.findall(self.contenido.get('1.0', 'end')))
+        if nombre in existentes:
+            eleccion = self._elegir_variable_repetida(opcion)
+            if eleccion is None:
+                return
+            if eleccion == 'otra':
+                numero = 2
+                while f'{nombre}_{numero}' in existentes:
+                    numero += 1
+                nombre = f'{nombre}_{numero}'
+        # El cursor del texto conserva su posición al abrir el menú.
+        self.contenido.insert('insert', '{' + nombre + '}')
+        self.contenido.focus_set()
+        self.contenido.see('insert')
+        self._mostrar_variables()
+
+    def _elegir_variable_repetida(self, etiqueta):
+        dialogo = ctk.CTkToplevel(self)
+        dialogo.title('Variable repetida')
+        dialogo.geometry('440x220')
+        dialogo.resizable(False, False)
+        dialogo.transient(self)
+        resultado = None
+
+        def elegir(valor):
+            nonlocal resultado
+            resultado = valor
+            dialogo.destroy()
+
+        ctk.CTkLabel(dialogo, text=f'Ya agregaste «{etiqueta}» en esta frase.',
+                     wraplength=400).pack(padx=20, pady=(16, 4))
+        ctk.CTkLabel(dialogo, text='¿Quieres repetir ese valor o completar uno diferente?',
+                     wraplength=400).pack(padx=20, pady=(0, 12))
+        ctk.CTkButton(dialogo, text='Reutilizar el mismo valor', width=280,
+                      command=lambda: elegir('misma')).pack(pady=4)
+        ctk.CTkButton(dialogo, text='Agregar otro valor', width=280,
+                      command=lambda: elegir('otra')).pack(pady=4)
+        ctk.CTkButton(dialogo, text='Cancelar', width=280, fg_color='#4B5563',
+                      command=lambda: elegir(None)).pack(pady=4)
+        dialogo.protocol('WM_DELETE_WINDOW', lambda: elegir(None))
+        dialogo.bind('<Escape>', lambda _: elegir(None))
+        dialogo.wait_visibility()
+        dialogo.grab_set()
+        self.wait_window(dialogo)
+        self.contenido.focus_set()
+        return resultado
+
     def _mostrar_variables(self):
         nombres = list(dict.fromkeys(_MARCADOR.findall(self.contenido.get('1.0', 'end'))))
         self.variables.configure(text='Campos variables: ' + ', '.join(f'{{{n}}}' for n in nombres)
-                                 if nombres else 'Sin campos variables. Usa {nombre}, {monto}, {fecha}…')
+                                 if nombres else 'Usa «Insertar variable…» o escribe {nombre}, {monto}, {fecha}…')
 
     def _avisar(self, texto, error=False):
         self.mensaje.configure(text=texto, text_color='#B91C1C' if error else '#15803D')
@@ -420,7 +569,26 @@ class VentanaPrincipal(ctk.CTk):
             self._frases_cambiaron()
             self.refrescar()
             self.nueva()
-            self._avisar('Frase eliminada.')
+            self._avisar('Frase propia eliminada. Puedes deshacerlo durante esta sesión.')
+
+    def alternar_favorita(self):
+        if self.seleccion is None:
+            return
+        ident = self.seleccion['id']
+        ok, activa = self._ejecutar(lambda: self.gestion.alternar_favorita(ident))
+        if ok:
+            self._frases_cambiaron()
+            self.refrescar(seleccionar=ident)
+            self.mostrar(self.gestion.repo.obtener_frase(ident))
+            self._avisar('Agregada a favoritas.' if activa else 'Quitada de favoritas.')
+
+    def deshacer_eliminacion(self):
+        ok, ident = self._ejecutar(self.gestion.deshacer_eliminacion)
+        if ok:
+            self._frases_cambiaron()
+            self.refrescar(seleccionar=ident)
+            self.mostrar(self.gestion.repo.obtener_frase(ident))
+            self._avisar('Frase propia recuperada.')
 
 
 def abrir(ruta=None, con_teclado=True, autenticacion=None, sesion=None):
@@ -476,19 +644,37 @@ def _abrir_autenticado(ruta, con_teclado, autenticacion, sesion):
             if expansion:
                 expansion.aplicar(ajustes)
         ventana.al_configurar = configurar
-        def solicitar():
-            ventana.estado_sync.configure(text='Comprobando catálogo compartido…')
-            servicio.solicitar()
-        ventana.al_sincronizar = solicitar
         activo = True
+        from fraseya.aplicacion.estado_sincronizacion import resumen_estado
+        eventos_bandeja = queue.Queue()
+        bandeja = None
+        if con_teclado:
+            try:
+                from .bandeja import Bandeja
+                bandeja = Bandeja(eventos_bandeja)
+                bandeja.iniciar()
+            except (ImportError, OSError, RuntimeError):
+                ventana.estado_publicacion.configure(text='Bandeja no disponible; consulta el estado en esta ventana.')
+                bandeja = None
+        def mostrar_estado(resultado=None, comprobando=False):
+            estado, texto = resumen_estado(repo, resultado, comprobando,
+                sin_conexion=sesion.token == 'offline')
+            ventana.estado_sync.configure(text=texto,
+                text_color='#B91C1C' if estado == 'error' else '#15803D')
+            if bandeja:
+                bandeja.actualizar(estado, texto)
+        mostrar_estado()
+        def solicitar_con_estado():
+            mostrar_estado(comprobando=True)
+            servicio.solicitar()
+        ventana.al_sincronizar = solicitar_con_estado
         def atender_sync():
             if not activo:
                 return
             try:
                 while True:
                     resultado = eventos_sync.get_nowait()
-                    ventana.estado_sync.configure(text=resultado.detalle,
-                        text_color='#B91C1C' if resultado.estado == 'error' else '#15803D')
+                    mostrar_estado(resultado)
                     if resultado.estado == 'actualizada':
                         seleccion = ventana.seleccion
                         ventana.refrescar()
@@ -497,14 +683,32 @@ def _abrir_autenticado(ruta, con_teclado, autenticacion, sesion):
                         ventana._frases_cambiaron()
             except queue.Empty:
                 pass
+            try:
+                while True:
+                    accion = eventos_bandeja.get_nowait()
+                    if accion == 'abrir':
+                        ventana.deiconify()
+                        ventana.lift()
+                    elif accion == 'sincronizar':
+                        ventana.al_sincronizar()
+                    elif accion == 'salir':
+                        cerrar()
+                        return
+            except queue.Empty:
+                pass
             ventana.after(100, atender_sync)
         ventana.after(100, atender_sync)
-        servicio.iniciar()
+        if sesion.token != 'offline':
+            servicio.iniciar()
+        else:
+            ventana.btn_sincronizar.configure(state='disabled')
 
         def cerrar():
             nonlocal activo
             activo = False
             servicio.detener()
+            if bandeja:
+                bandeja.detener()
             if expansion:
                 expansion.detener()
             ventana.destroy()

@@ -97,7 +97,12 @@ def iniciar_expansion(ventana, repo):
     def pedir(nombres, iniciales):
         return puente.llamar(lambda: pedir_valores(nombres, iniciales, parent=ventana))
 
-    motor = MotorExpansion(escritor, pedir, ventana_activa, activar_ventana)
+    def pedir_contexto(nombres, iniciales, contenido):
+        return puente.llamar(lambda: pedir_valores(
+            nombres, iniciales, parent=ventana, contenido=contenido))
+
+    motor = MotorExpansion(escritor, pedir, ventana_activa, activar_ventana,
+                           pedir_con_contexto=pedir_contexto)
     catalogo = []
 
     def recargar():

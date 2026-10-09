@@ -121,7 +121,7 @@ class VentanaBuscador(ctk.CTkToplevel):
         self.tabla.delete(*self.tabla.get_children())
         for i, f in enumerate(self.resultados):
             self.tabla.insert('', 'end', iid=str(i), tags=(f.get('origen', ''),),
-                              values=(f['abreviatura'], f['titulo'], f.get('categoria', '')))
+                              values=(f['abreviatura'], ('★ ' if f.get('favorita') else '') + f['titulo'], f.get('categoria', '')))
         if self.resultados:
             self.tabla.selection_set('0')
             self.tabla.focus('0')

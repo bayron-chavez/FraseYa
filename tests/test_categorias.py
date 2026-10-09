@@ -49,3 +49,56 @@ def test_fusion_conserva_frases_y_categorias_anteriores():
     fusion = ServicioPublicacion._fusionar(anteriores, nuevas)
     assert fusion[0] == anteriores[0]
     assert fusion[1] == nuevas[0]
+
+
+def test_editar_color_renombrar_y_eliminar_categoria_vacia():
+    with RepositorioSQLite(':memory:') as repo:
+        gestion = GestionFrases(repo)
+        auth, sesion = Mock(), object()
+        ident = gestion.crear_categoria('Ventas', auth, sesion)
+        gestion.editar_categoria(ident, 'Comercial', '#123456', auth, sesion)
+        assert repo.obtener_categoria(ident)['nombre'] == 'Comercial'
+        assert repo.obtener_categoria(ident)['color'] == '#123456'
+        gestion.editar_categoria(ident, '', '#123456', auth, sesion, eliminar=True)
+        assert not any(c['nombre'] in ('Ventas', 'Comercial') for c in gestion.categorias_propias())
+        assert len(gestion.operaciones_categorias()) == 2
+
+
+def test_no_elimina_categoria_ocupada_o_usuario_no_autorizado():
+    with RepositorioSQLite(':memory:') as repo:
+        gestion = GestionFrases(repo)
+        auth, sesion = Mock(), object()
+        ident = gestion.crear_categoria('Ventas', auth, sesion)
+        gestion.crear('Hola', 'hola', 'Hola', ident)
+        with pytest.raises(ValueError, match='contiene frases'):
+            gestion.editar_categoria(ident, '', '#123456', auth, sesion, eliminar=True)
+        auth.validar.side_effect = PermissionError('Solo admin')
+        with pytest.raises(PermissionError):
+            gestion.editar_categoria(ident, 'Otra', '#123456', auth, sesion)
+        assert repo.obtener_categoria(ident)['nombre'] == 'Ventas'
+
+
+def test_espejos_reciben_color_y_no_republican_categorias_vacias_antiguas():
+    with RepositorioSQLite(':memory:') as repo:
+        gestion = GestionFrases(repo)
+        repo.reemplazar_compartidas(1, 'admin', '2026-10-08', [{'nombre': 'Ventas', 'color': '#112233', 'frases': []}])
+        ventas = next(c for c in gestion.categorias_propias() if c['nombre'] == 'Ventas')
+        repo.reemplazar_compartidas(2, 'admin', '2026-10-08', [{'nombre': 'Ventas', 'color': '#445566', 'frases': []}])
+        ventas_actual = next(c for c in gestion.categorias_propias() if c['nombre'] == 'Ventas')
+        assert ventas_actual['id'] == ventas['id']
+        assert ventas_actual['color'] == '#445566'
+        repo.reemplazar_compartidas(3, 'admin', '2026-10-08', [{'nombre': 'Comercial', 'color': '#445566', 'frases': []}])
+        assert not any(c['nombre'] == 'Ventas' for c in gestion.categorias_propias())
+        aporte = ServicioPublicacion(repo, 'supabase', 'admin').recoger_categorias()
+        assert not any(c['nombre'] in ('Ventas', 'Comercial') for c in aporte)
+
+
+def test_cambio_color_admin_no_es_revertido_por_cache_compartida():
+    with RepositorioSQLite(':memory:') as repo:
+        gestion = GestionFrases(repo)
+        repo.reemplazar_compartidas(1, 'admin', '2026-10-08', [{'nombre': 'Ventas', 'color': '#112233', 'frases': []}])
+        ident = next(c for c in gestion.categorias_propias() if c['nombre'] == 'Ventas')['id']
+        gestion.editar_categoria(ident, 'Ventas', '#445566', Mock(), object())
+        assert next(c for c in gestion.categorias_propias() if c['nombre'] == 'Ventas')['color'] == '#445566'
+        assert next(c for c in ServicioPublicacion(repo, 'supabase', 'admin').recoger_categorias()
+            if c['nombre'] == 'Ventas')['color'] == '#445566'

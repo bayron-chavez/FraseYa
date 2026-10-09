@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import time
 import copy
+import json
 
 from fraseya.aplicacion.formato_catalogo import serializar
 
@@ -58,8 +59,10 @@ class ServicioPublicacion:
         categorias = {c['id']: c for c in self.repo.listar_categorias()}
         grupos = {}
         propios = {c['id'] for c in self.repo.listar_catalogos('propia')}
+        espejos = json.loads(self.repo.leer_configuracion('categorias_espejo', '{}'))
         for categoria in categorias.values():
-            if categoria['catalogo_id'] in propios:
+            if (categoria['catalogo_id'] in propios
+                    and espejos.get(str(categoria['id'])) != categoria['nombre'].casefold()):
                 grupos.setdefault(categoria['nombre'], {'nombre': categoria['nombre'],
                     'color': categoria['color'], 'frases': []})
         for frase in self.repo.listar_frases('propia'):
@@ -72,7 +75,7 @@ class ServicioPublicacion:
             grupos[clave]['frases'].append({k: frase[k] for k in ('titulo', 'abreviatura', 'contenido')})
         return list(grupos.values())
 
-    def preparar(self, categorias=None, *, eliminar=()):
+    def preparar(self, categorias=None, *, eliminar=(), operaciones_categorias=()):
         """Vista previa. Si se pasa un snapshot, no accede a SQLite."""
         categorias = self.recoger_categorias() if categorias is None else categorias
         try:
@@ -81,6 +84,19 @@ class ServicioPublicacion:
             viejas = []
             if anterior:
                 anterior, viejas = lector.leer()
+            originales = copy.deepcopy(viejas)
+            if operaciones_categorias:
+                self._exigir_administrador()
+                for operacion in operaciones_categorias:
+                    for categoria in list(viejas):
+                        if categoria['nombre'].casefold() != operacion['anterior'].casefold():
+                            continue
+                        if operacion['nombre'] is None:
+                            if categoria['frases']:
+                                raise ErrorPublicacion('La categoría remota contiene frases; no se puede eliminar.')
+                            viejas.remove(categoria)
+                        else:
+                            categoria['nombre'], categoria['color'] = operacion['nombre'], operacion['color']
             version = anterior.version + 1 if anterior else 1
             fecha = datetime.fromtimestamp(self._reloj(), timezone.utc).isoformat()
             # Validar el aporte antes de fusionar: no ocultar duplicados o
@@ -100,7 +116,7 @@ class ServicioPublicacion:
             def frases(lista):
                 return {f['abreviatura'].casefold(): (c['nombre'], c['color'], f)
                         for c in lista for f in c['frases']}
-            antes, despues = frases(viejas), frases(categorias)
+            antes, despues = frases(originales), frases(categorias)
             return VistaPublicacion(self.destino, anterior.version if anterior else 0, version,
                 sum(len(c['frases']) for c in categorias), len(categorias),
                 len(despues.keys() - antes.keys()),

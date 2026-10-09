@@ -20,3 +20,6 @@ pythonpath = ["src"]
 
 [tool.coverage.run]
 source = ["fraseya"]
+
+[tool.coverage.report]
+fail_under = 70

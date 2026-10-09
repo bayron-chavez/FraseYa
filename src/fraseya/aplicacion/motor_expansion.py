@@ -19,9 +19,10 @@ PAUSA_TRAS_FORMULARIO_S = 0.15
 
 class MotorExpansion:
     def __init__(self, escritor, pedir_valores, ventana_activa=lambda: None,
-                 activar_ventana=lambda _ventana: None, lanzar=None):
+                 activar_ventana=lambda _ventana: None, lanzar=None, pedir_con_contexto=None):
         self.escritor = escritor
         self._pedir_valores = pedir_valores
+        self._pedir_con_contexto = pedir_con_contexto
         self._ventana_activa = ventana_activa
         self._activar_ventana = activar_ventana
         self._lanzar = lanzar or self._lanzar_en_hilo
@@ -97,7 +98,10 @@ class MotorExpansion:
         """
         try:
             tiene_campos = bool(resolver_variables.detectar(contenido))
-            texto = resolver_variables.resolver(contenido, self._pedir_valores)
+            pedir = self._pedir_valores
+            if self._pedir_con_contexto is not None:
+                pedir = lambda nombres, iniciales: self._pedir_con_contexto(nombres, iniciales, contenido)
+            texto = resolver_variables.resolver(contenido, pedir)
             if texto is None:        # canceló el formulario: no se escribe ni borra nada
                 if devolver_foco and ventana:
                     self._activar_ventana(ventana)

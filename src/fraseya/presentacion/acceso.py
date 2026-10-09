@@ -40,6 +40,8 @@ class VentanaAcceso(ctk.CTk):
                 self._entradas.put((True, self.autenticacion.iniciar_sesion(correo, clave)))
             except (ValueError, PermissionError) as error:
                 self._entradas.put((False, str(error)))
+            except Exception:
+                self._entradas.put((False, 'No se pudo iniciar sesión. Vuelve a intentarlo.'))
         Thread(target=conectar, daemon=True).start()
         return
 
@@ -48,6 +50,7 @@ class VentanaAcceso(ctk.CTk):
             ok, resultado = self._entradas.get_nowait()
             self._entrando = False
             self.boton_entrar.configure(state='normal')
+            self.clave.delete(0, 'end')
             if ok:
                 self.sesion = resultado
                 self.destroy()

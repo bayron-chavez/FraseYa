@@ -1,5 +1,45 @@
 # Auditoría de seguridad de FraseYa
 
+## Revisión adicional del 8 de octubre de 2026
+
+Se repitieron los 31 controles PostgreSQL aislados y las tres consultas anónimas
+al proyecto real: acceso al catálogo, perfiles y RPC de perfil denegado.
+Se añadió protección local de login con cinco intentos por minuto por instancia,
+independiente del correo, sincronizada entre hilos. Ante HTTP 429 se impide enviar
+nuevos intentos durante cinco minutos. No se reinicia el presupuesto por logout
+o por login correcto; cerrar la aplicación sí reinicia este límite local.
+El 8 de octubre se redujo el límite real de inicios de sesión/registro de
+Supabase de 30 a 15 peticiones por IP cada cinco minutos y se verificó el guardado.
+No se ejecutó una ráfaga de contraseñas contra cuentas reales para alcanzar
+el límite: el manejo de HTTP 429 y la concurrencia se probaron con transportes
+aislados. La configuración en servidor cubre llamadas directas y varias instancias.
+
+La consulta de auditoría real devolvió true en sus once controles. La función
+fraseya_publicar coincide con el cuerpo de la migración 002 (comparación del hash
+normalizando espacios); es SECURITY DEFINER con search_path vacío. No fue
+necesario aplicar migraciones ni modificar datos de cuentas o del catálogo.
+
+El login rechaza campos vacíos/excesivos antes de la petición, invalida la sesión
+anterior al intentar otra cuenta y borra la contraseña del formulario tras la
+respuesta. El backend mantiene tokens solo en RAM y los descarta tras un fallo.
+Las pruebas incluyen cien intentos concurrentes sobre el limitador: solo cinco
+obtienen permiso; credenciales erróneas producen un mensaje común.
+
+Excel se procesa con XML protegido, sin fórmulas ni macros y con límites de
+archivo, número de partes, tamaño descomprimido y filas. Se probaron fórmulas,
+duplicados, ZIP excesivo y entidades XML externas. Los textos con instrucciones
+SQL se almacenan como datos. La creación de categorías nuevas requiere verificar
+administrador. Los permisos de publicación siguen comprobándose en PostgreSQL.
+
+La recuperación de SQLite se probó terminando un proceso con una transacción
+abierta: la reapertura conserva las frases y versión anterior y pasa integrity_check.
+La revisión actual de dependencias, incluidas Pillow, pystray y defusedxml, no
+encontró vulnerabilidades conocidas. Consulta `DEPENDENCIAS_AUDITADAS.txt` para
+las versiones revisadas. Esto no constituye una garantía frente a nuevos ataques.
+
+Referencias: [límites de Supabase Auth](https://supabase.com/docs/guides/auth/rate-limits)
+y [configuración de producción](https://supabase.com/docs/guides/deployment/going-into-prod).
+
 Fecha: 5 de octubre de 2026. Alcance: código actual, SQLite, cliente Supabase,
 funciones y permisos SQL entregados, pruebas locales y consultas anónimas al
 proyecto configurado. No se realizó una prueba de penetración integral ni se
@@ -18,7 +58,8 @@ verificó toda la configuración del dashboard. No garantiza ausencia de ataques
 | Tokens y respuestas inválidas | Algunas respuestas malformadas podían dejar sesión parcial o producir errores internos | Validación de tokens/perfil/catálogo y descarte de sesión ante HTTP 401 |
 
 La migración 002 es necesaria para aplicar los refuerzos del servidor al
-proyecto existente. Este informe NO afirma que ya se haya aplicado.
+proyecto existente. La comprobación del 8 de octubre confirma sus permisos
+y función de publicación en el proyecto revisado.
 
 ## Inyección SQL
 
@@ -67,7 +108,9 @@ que se conserva literalmente y que las tablas siguen existiendo.
    administrador del sistema.
 6. Falta comprobar en el dashboard todas las extensiones, políticas adicionales
    y credenciales históricas. La auditoría real fue anónima; los controles con
-   usuarios/admin se ejecutaron en la base aislada, no con cuentas reales.
+  usuarios/admin se ejecutaron en la base aislada, no mediante inicios de sesión
+  con contraseñas reales. El 8 de octubre también se comprobaron permisos y la
+  función de publicación desde SQL Editor en la base real.
 
 ## Aplicar y comprobar
 

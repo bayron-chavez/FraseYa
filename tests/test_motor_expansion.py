@@ -39,6 +39,26 @@ def escribir(m, texto):
         m.caracter(c)
 
 
+def test_formulario_recibe_contexto_tanto_teclado_como_buscador():
+    recibidos = []
+    escritor = EscritorFalso()
+    contenido = 'Hola {nombre}, te atiende {nombre_2}'
+
+    def pedir(nombres, iniciales, frase):
+        recibidos.append((nombres, frase))
+        return {'nombre': 'Ana', 'nombre_2': 'Luis'}
+
+    m = MotorExpansion(escritor, lambda *_: None, lanzar=lambda trabajo: trabajo(),
+                       pedir_con_contexto=pedir)
+    m.actualizar_frases([{'abreviatura': 'saludo', 'contenido': contenido}])
+    escribir(m, 'saludo')
+    m.confirmar()
+    m.insertar(contenido, None)
+    assert recibidos == [(['nombre', 'nombre_2'], contenido)] * 2
+    assert escritor.llamadas == [(6, 'Hola Ana, te atiende Luis'),
+                                 (0, 'Hola Ana, te atiende Luis')]
+
+
 def test_expande_al_confirmar_una_abreviatura_existente():
     m, escritor, _ = motor()
     escribir(m, 'hola')

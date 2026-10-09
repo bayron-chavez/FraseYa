@@ -1,5 +1,14 @@
 # Sincronización con Supabase
 
+RF-09 muestra la versión instalada, la última comprobación (hora local) y
+su resultado. El historial se recupera al iniciar y los errores conservan
+el catálogo instalado. En modo sin conexión no se consulta la red.
+
+La bandeja usa verde para actualizado/sin cambios, rojo para error, naranja
+al comprobar y gris para sin conexión. Permite abrir FraseYa, sincronizar
+o salir. Al cerrar la aplicación se retira el icono. `--sin-teclado` no
+inicia la bandeja. Instalar las dependencias con `pip install -r requirements.txt`.
+
 ServicioSincronizacion inicia una comprobación al abrir FraseYa y después
 respeta el intervalo configurado. Sincronizar ahora despierta el servicio.
 Cada hilo utiliza su propia conexión SQLite; la interfaz recibe resultados

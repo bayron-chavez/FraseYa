@@ -1,5 +1,9 @@
 # FraseYa
 
+También se puede distribuir con un instalador de Windows en español. Consulta
+[Instalación y actualización](docs/INSTALACION.md). Para generarlo, utiliza
+`scripts/crear_instalador.ps1` después de crear el portable.
+
 Aplicación de escritorio Windows para expandir frases por abreviatura, buscar
 textos y rellenar variables. Supabase proporciona las cuentas y el catálogo
 central. SQLite guarda frases propias y la última copia del catálogo.

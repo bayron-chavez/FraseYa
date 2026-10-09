@@ -27,6 +27,8 @@ class VentanaPrincipal(ctk.CTk):
     def __init__(self, gestion: GestionFrases, al_cambiar=None, autenticacion=None, sesion=None):
         ctk.set_appearance_mode('light')
         super().__init__()
+        from .identidad import configurar_icono
+        configurar_icono(self)
         self.gestion = gestion
         self.autenticacion, self.sesion = autenticacion, sesion
         self.al_salir = None

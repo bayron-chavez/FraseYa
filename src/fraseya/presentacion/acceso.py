@@ -7,11 +7,17 @@ from threading import Thread
 class VentanaAcceso(ctk.CTk):
     def __init__(self, autenticacion):
         super().__init__()
+        from .identidad import configurar_icono, recurso
+        from PIL import Image
+        configurar_icono(self)
         self.autenticacion = autenticacion
         self.sesion = None
 
         self.title('FraseYa — Acceso')
-        self.geometry('420x330')
+        self.geometry('420x430')
+        with Image.open(recurso('logo.png')) as original:
+            self._logo = ctk.CTkImage(light_image=original.copy(), dark_image=original.copy(), size=(90, 90))
+        ctk.CTkLabel(self, text='', image=self._logo).pack(pady=(12, 0))
         ctk.CTkLabel(self, text='Iniciar sesión',
                      font=ctk.CTkFont(size=20, weight='bold')).pack(pady=20)
         self._entradas = queue.Queue()

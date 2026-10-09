@@ -6,9 +6,16 @@ La aplicación no envía mensajes en tu nombre ni lee conversaciones.
 
 ## Iniciar
 
+Si recibiste `FraseYa-Instalador.exe`, ábrelo y completa el asistente. Puedes
+crear un acceso directo en el escritorio; también estará en el menú Inicio.
+Después abre FraseYa e inicia sesión con tu correo y contraseña: el instalador
+incluye la conexión pública a nuestro proyecto Supabase.
+No necesitas instalar Python. La instalación no incluye frases ni cuentas de
+otro equipo.
+
 Descomprime toda la carpeta portable dentro de tu perfil de Windows y abre
 FraseYa.exe. Conserva la carpeta `_internal` junto al ejecutable. En el primer
-inicio introduce la URL del proyecto y su clave pública, proporcionadas por el
+inicio del portable introduce la URL del proyecto y su clave pública, proporcionadas por el
 administrador. Entra con tu correo y contraseña de Supabase. Nunca introduzcas
 la contraseña de la base ni una clave secret/service_role.
 

@@ -12,7 +12,7 @@ def test_estado_y_cierre_del_icono():
         icono.run_detached.assert_called_once()
         bandeja.actualizar('error', 'Versión vigente: 3\nRed inaccesible')
         assert 'Versión vigente: 3' in icono.title
-        assert icono.icon.getpixel((8, 32))[:3] == (185, 28, 28)
+        assert icono.icon.getpixel((54, 54))[:3] == (185, 28, 28)
         bandeja.detener()
         icono.stop.assert_called_once()
 

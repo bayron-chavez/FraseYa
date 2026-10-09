@@ -7,6 +7,8 @@ from fraseya.infraestructura.supabase import validar_conexion
 
 def configurar_supabase(ruta):
     ventana = ctk.CTk()
+    from .identidad import configurar_icono
+    configurar_icono(ventana)
     ventana.title('FraseYa — Configurar proyecto')
     ventana.geometry('550x310')
     ctk.CTkLabel(ventana, text='Conectar FraseYa a Supabase', font=ctk.CTkFont(size=20)).pack(pady=16)

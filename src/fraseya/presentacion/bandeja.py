@@ -1,6 +1,7 @@
 """Icono de bandeja; sus acciones se entregan a Tk mediante una cola."""
 from PIL import Image, ImageDraw
 import pystray
+from .identidad import recurso
 
 
 class Bandeja:
@@ -15,11 +16,10 @@ class Bandeja:
     def _imagen(estado):
         color = {'error': '#B91C1C', 'offline': '#64748B', 'comprobando': '#D97706',
                  'actualizada': '#15803D', 'sin_cambios': '#15803D'}.get(estado, '#2563EB')
-        imagen = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+        with Image.open(recurso('logo.png')) as original:
+            imagen = original.convert('RGBA').resize((64, 64), Image.Resampling.LANCZOS)
         dibujo = ImageDraw.Draw(imagen)
-        dibujo.rounded_rectangle((4, 4, 60, 60), radius=12, fill=color)
-        dibujo.line((23, 48, 23, 17, 44, 17), fill='white', width=6)
-        dibujo.line((23, 31, 39, 31), fill='white', width=6)
+        dibujo.ellipse((44, 44, 63, 63), fill=color, outline='white', width=2)
         return imagen
 
     def iniciar(self):

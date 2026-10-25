@@ -3,7 +3,7 @@
   #error Genera el instalador con scripts/crear_instalador.ps1 para validar su conexion publica.
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.2.0"
 #endif
 
 [Setup]
@@ -16,7 +16,7 @@ DefaultGroupName=FraseYa
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-MinVersion=10.0
+MinVersion=10.0.17763
 OutputDir=..\dist
 OutputBaseFilename=FraseYa-Instalador
 Compression=lzma2
@@ -44,6 +44,8 @@ Source: "..\docs\GUIA_ADMINISTRADOR.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\ACEPTACION_EQUIPOS.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\VALIDACION.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\INSTALACION.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\docs\INTERFAZ_QT.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\docs\AUDITORIA_QT_2026-10-10.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\FraseYa"; Filename: "{app}\FraseYa.exe"; WorkingDir: "{app}"

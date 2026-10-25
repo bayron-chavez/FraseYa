@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 Push-Location (Join-Path $PSScriptRoot '..')
 try {
     if ($Reconstruir) {
-        & (Join-Path $PSScriptRoot 'empaquetar.ps1')
+        & (Join-Path $PSScriptRoot 'empaquetar.ps1') -Python $Python
     }
     if (-not (Test-Path -LiteralPath 'dist/FraseYa/FraseYa.exe')) {
         throw 'Genera el portable primero o utiliza -Reconstruir.'

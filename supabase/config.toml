@@ -1,0 +1,3 @@
+[functions.fraseya-ia]
+# La función valida la sesión mediante Supabase Auth y exige un perfil activo.
+verify_jwt = false

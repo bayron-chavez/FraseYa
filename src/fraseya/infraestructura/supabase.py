@@ -76,7 +76,7 @@ class ClienteSupabase:
     def _http(self, metodo, ruta, cuerpo, headers):
         solicitud = Request(self.url + ruta, data=cuerpo, headers=headers, method=metodo)
         try:
-            with self._abrir(solicitud, timeout=10) as respuesta:
+            with self._abrir(solicitud, timeout=40 if ruta == '/functions/v1/fraseya-ia' else 10) as respuesta:
                 datos = respuesta.read(MAX_BYTES * 2 + 1)
                 if len(datos) > MAX_BYTES * 2:
                     raise ErrorSupabase('La respuesta del catálogo excede el tamaño permitido.')

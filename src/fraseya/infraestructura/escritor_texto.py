@@ -37,11 +37,11 @@ class TecladoWindows:
     class _UNION(ctypes.Union):
         pass
 
+    _UNION._fields_ = [('ki', _KEYBDINPUT), ('mi', _MOUSEINPUT)]
+
     def __init__(self):
         if sys.platform != 'win32':
             raise OSError('TecladoWindows solo funciona en Windows.')
-        self._UNION._fields_ = [('ki', self._KEYBDINPUT), ('mi', self._MOUSEINPUT)]
-
         class _INPUT(ctypes.Structure):
             _fields_ = [('type', wintypes.DWORD), ('u', self._UNION)]
 

@@ -39,6 +39,7 @@ class VentanaPrincipal(ctk.CTk):
         self._publicaciones = queue.Queue()
         self._publicando = False
         self._configuracion = None
+        self._ventana_ia = None
         self._colores_boton = {}
         self.seleccion = None  # frase mostrada en el editor; None = frase nueva
         self.title('FraseYa')
@@ -78,6 +79,8 @@ class VentanaPrincipal(ctk.CTk):
         self.btn_deshacer = ctk.CTkButton(barra, text='Deshacer eliminación',
                                          command=self.deshacer_eliminacion, state='disabled')
         self.btn_deshacer.grid(row=5, column=1, padx=8, pady=(4, 0))
+        ctk.CTkButton(barra, text='Sugerir respuesta · IA', command=self.abrir_ia).grid(
+            row=5, column=2, columnspan=2, pady=(4, 0))
         self.estado_sync = ctk.CTkLabel(barra, text='', anchor='w', wraplength=600)
         self.estado_sync.grid(row=1, column=1, columnspan=3, sticky='ew', padx=8)
         self.btn_publicar = ctk.CTkButton(barra, text='Publicar catálogo…', command=self.publicar_catalogo)
@@ -91,6 +94,25 @@ class VentanaPrincipal(ctk.CTk):
         if self.sesion and self.sesion.rol == 'administrador':
             ctk.CTkButton(barra, text='Eliminar del catálogo…', fg_color='#B91C1C',
                 command=self.eliminar_del_catalogo).grid(row=3, column=2, columnspan=2, pady=6)
+
+    def abrir_ia(self):
+        if (not self.sesion or self.sesion.token == 'offline'
+                or not self.autenticacion or not hasattr(self.autenticacion, 'cliente')):
+            self._avisar('Inicia sesión con conexión para usar las recomendaciones de IA.', error=True)
+            return
+        if self._ventana_ia is not None and self._ventana_ia.winfo_exists():
+            self._ventana_ia.lift()
+            return
+        from .recomendaciones_ia import VentanaIA
+        def cerrar_ia():
+            self.refrescar(seleccionar=self.seleccion['id'] if self.seleccion else None)
+            if self.al_pausar:
+                self.al_pausar(False)
+        self._ventana_ia = VentanaIA(self, self.autenticacion.cliente, self.gestion,
+                                   lambda frase: self.mostrar(frase),
+                                   al_cerrar=cerrar_ia, administrador=self.sesion.rol == 'administrador')
+        if self.al_pausar:
+            self.al_pausar(True)
 
     def eliminar_del_catalogo(self):
         try:

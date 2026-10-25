@@ -12,7 +12,8 @@ def main():
     for nombre, metodo, ruta, datos in [
         ('Lectura anónima de catálogo', 'GET', '/rest/v1/fraseya_catalogo?select=version&limit=1', None),
         ('Lectura anónima de perfiles', 'GET', '/rest/v1/fraseya_perfiles?select=id&limit=1', None),
-        ('Perfil sin iniciar sesión', 'POST', '/rest/v1/rpc/fraseya_perfil', {})]:
+        ('Perfil sin iniciar sesión', 'POST', '/rest/v1/rpc/fraseya_perfil', {}),
+        ('IA sin sesión', 'POST', '/functions/v1/fraseya-ia', {'mensaje':'Prueba de acceso anónimo','frases':[]})]:
         try:
             resultado = cliente.solicitar(metodo, ruta, datos, autenticado=False)
             if resultado:

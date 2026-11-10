@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FraseYa · Prototipo interactivo</title>
+<style>
+:root{--navy:#1f3a5f;--navy2:#2a4a75;--acc:#2f6fb3;--bg:#f4f6fa;--card:#fff;--line:#cfd6e2;--fg:#1b2230;--mut:#5b6578;--ok:#2e9e6a;--warn:#e08a1e;--bad:#d64545;--vio:#8a4fc2}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI",Inter,system-ui,sans-serif;background:var(--bg);color:var(--fg);font-size:14px}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid #7fb0ea;outline-offset:2px}
+.btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 14px;font-weight:600}
+.btn:hover{border-color:var(--acc)}
+.btn.p{background:var(--acc);border-color:var(--acc);color:#fff}
+.btn.p:hover{background:#255c97}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+input,select,textarea{border:1px solid var(--line);border-radius:8px;padding:9px 10px;background:#fff;width:100%}
+textarea{resize:vertical;min-height:96px}
+label{display:block;font-size:12px;font-weight:700;color:var(--mut);margin:0 0 4px}
+.muted{color:var(--mut)}
+.hide{display:none!important}
+/* login */
+#login{min-height:100vh;display:grid;place-items:center;padding:16px}
+.lcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:28px;width:min(360px,100%);display:grid;gap:12px;text-align:center}
+.logo{width:56px;height:56px;border-radius:14px;background:var(--acc);color:#fff;font-weight:800;font-size:32px;display:grid;place-items:center;margin:0 auto}
+.lcard h1{margin:4px 0 0;color:var(--navy);font-size:22px}
+.lcard .f{text-align:left}
+.err{color:var(--bad);font-size:12.5px;min-height:18px}
+.roles{display:flex;gap:14px;justify-content:center;font-size:12.5px;color:var(--mut)}
+.roles label{display:inline-flex;gap:6px;align-items:center;margin:0;font-weight:600}
+.roles input{width:auto}
+/* app */
+#app{display:grid;grid-template-columns:220px 1fr;min-height:100vh}
+aside{background:var(--navy);color:#fff;padding:22px 14px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh}
+aside .brand{font-size:22px;font-weight:800;padding:0 8px}
+aside .lema{font-size:11px;color:#b9c7dd;padding:0 8px 16px}
+.nav{background:none;border:0;color:#fff;text-align:left;padding:9px 10px;border-radius:8px;font-size:13.5px}
+.nav:hover{background:#ffffff1a}
+.nav[aria-current=page]{background:#ffffff2e;font-weight:700}
+.nav.adm{border:1px solid #8fa6c6;margin-top:6px;font-size:12.5px}
+.sync{font-size:10.5px;color:#b9c7dd;padding:8px 10px}
+.who{margin-top:auto;padding:8px;font-size:12px}
+.who small{color:#b9c7dd;display:block}
+main{padding:24px 28px;min-width:0}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.head h2{margin:0;font-size:26px;color:var(--navy)}
+.tools{display:grid;grid-template-columns:1fr 130px 190px;gap:8px;margin-bottom:14px}
+.split{display:grid;grid-template-columns:minmax(240px,320px) 1fr;gap:14px;align-items:start}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.panel h3{margin:0 0 8px;font-size:14px;color:var(--navy)}
+.list{list-style:none;margin:0;padding:0;display:grid;gap:4px;max-height:60vh;overflow:auto}
+.list button{width:100%;text-align:left;border:0;background:none;padding:9px 10px;border-radius:8px}
+.list button:hover{background:#eef3fb}
+.list button[aria-selected=true]{background:#e2ebf9}
+.list b{display:block;font-size:13.5px}
+.list span{font-size:11.5px;color:var(--mut)}
+.row{display:grid;grid-template-columns:1fr 150px;gap:10px;margin-bottom:10px}
+.vars{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.vars .btn{padding:4px 10px;font-size:12.5px}
+.preview{background:#f1f5fb;border:1px solid var(--line);border-radius:8px;padding:10px;min-height:48px;white-space:pre-wrap}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.acts .sp{flex:1}
+.pill{display:inline-block;border-radius:99px;padding:3px 10px;font-size:12px;font-weight:700;color:#fff}
+/* asistente */
+.live{display:grid;grid-template-columns:minmax(260px,1fr) minmax(300px,420px);gap:16px;align-items:start}
+.chat{display:flex;flex-direction:column;height:540px;padding:0;overflow:hidden}
+.chat header{background:#2b8a6e;color:#fff;padding:12px 16px;font-weight:700}
+.msgs{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:8px;background:#f6f8fb}
+.m{max-width:80%;padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:#fff}
+.m.me{align-self:flex-end;background:#dcf3e6}
+.composer{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line);background:#fff}
+.bar{background:var(--navy);color:#fff;border-radius:12px;padding:12px 14px;display:grid;gap:8px}
+.bar .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.sw{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:12px}
+.sw button{width:46px;height:26px;border-radius:99px;border:0;background:#6b7a90;position:relative}
+.sw button::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s}
+.sw button[aria-pressed=true]{background:var(--ok)}
+.sw button[aria-pressed=true]::after{left:23px}
+.tags{display:flex;gap:6px;flex-wrap:wrap}
+.cards{display:grid;gap:12px;margin-top:12px}
+.card{background:#fff;border:2px solid var(--c,var(--acc));border-radius:12px;box-shadow:0 6px 16px #0002;overflow:hidden;touch-action:none}
+.card .h{background:var(--c,var(--acc));color:#fff;padding:7px 12px;font-weight:700;display:flex;justify-content:space-between;cursor:grab}
+.card .h button{background:none;border:0;color:#fff;font-size:15px}
+.card .b{padding:12px;display:grid;gap:10px}
+.card .a{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.note{font-size:12px;color:var(--mut);font-style:italic}
+.sim{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 12px}
+/* modal / toast */
+.ov{position:fixed;inset:0;background:#0007;display:grid;place-items:center;padding:16px;z-index:20}
+.dlg{background:#fff;border-radius:14px;padding:20px;width:min(560px,100%);max-height:90vh;overflow:auto;display:grid;gap:12px}
+.dlg h3{margin:0;font-size:20px;color:var(--navy)}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kpis div{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;text-align:center}
+.kpis b{display:block;font-size:26px}
+.hl{background:#fde9a8;border-radius:3px;padding:0 2px;font-weight:700}
+.miss{background:#f3d7d7;color:#a33;border-radius:3px;padding:0 2px}
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#172b4d;color:#fff;padding:10px 16px;border-radius:8px;z-index:30;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.on{opacity:1}
+.dot{display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:middle;margin-right:6px}
+@media (max-width:900px){
+ #app{grid-template-columns:1fr}
+ aside{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:10px}
+ aside .lema,aside .sync,aside .who{display:none}
+ aside .brand{padding-right:8px}
+ main{padding:16px}
+ .tools{grid-template-columns:1fr 1fr}.tools input{grid-column:1/-1}
+ .split,.live{grid-template-columns:1fr}
+ .row{grid-template-columns:1fr}
+ .chat{height:380px}
+ .list{max-height:260px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<!-- ACCESO -->
+<section id="login" aria-label="Acceso">
+  <form class="lcard" id="fLogin" novalidate>
+    <div class="logo" aria-hidden="true">F</div>
+    <h1>FraseYa</h1><div class="muted">Las palabras, a su tiempo.</div>
+    <div class="f"><label for="correo">Correo</label><input id="correo" type="email" autocomplete="username" placeholder="nombre@empresa.cl"></div>
+    <div class="f"><label for="clave">Contraseña</label><input id="clave" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+    <div class="roles" role="radiogroup" aria-label="Rol de la demostración">
+      <label><input type="radio" name="rol" value="usuario" checked> Usuario</label>
+      <label><input type="radio" name="rol" value="administrador"> Administrador</label>
+    </div>
+    <div class="err" id="lerr" role="alert"></div>
+    <button class="btn p" type="submit">Iniciar sesión</button>
+    <button class="btn" type="button" id="offline">Trabajar sin conexión</button>
+    <div class="note">Demostración: use cualquier correo y contraseña. Máximo 5 intentos por minuto.</div>
+  </form>
+</section>
+
+<!-- APLICACIÓN -->
+<div id="app" class="hide">
+  <aside>
+    <div class="brand">FraseYa</div><div class="lema">Las palabras, a su tiempo.</div>
+    <button class="nav" data-v="frases" aria-current="page">Mis frases</button>
+    <button class="nav" data-v="favoritas">Favoritas</button>
+    <button class="nav" data-v="asistente">Asistente en vivo</button>
+    <button class="nav" data-fuera="Importar Excel">Importar Excel</button>
+    <button class="nav" data-fuera="Configuración">Configuración</button>
+    <button class="nav" data-fuera="Sincronizar">Sincronizar ahora</button>
+    <div class="sync" id="sync">Catálogo central · versión 11</div>
+    <button class="nav adm hide" id="bPub">Publicar catálogo</button>
+    <button class="nav adm hide" id="bCat">Gestionar categorías</button>
+    <div class="who"><span id="quien"></span><small id="rolTxt"></small><button class="btn" style="margin-top:8px;width:100%;background:none;color:#fff;border-color:#8fa6c6" id="salir">Cerrar sesión</button></div>
+  </aside>
+  <main>
+    <!-- Frases -->
+    <section id="vFrases">
+      <div class="head"><div><h2 id="titulo">Mis frases</h2><div class="muted">Encuentra las palabras correctas, sin empezar de cero.</div></div><button class="btn p" id="nueva">+ Nueva frase</button></div>
+      <div class="tools">
+        <input id="q" type="search" aria-label="Buscar frases" placeholder="Buscar por título, contenido o abreviatura…">
+        <select id="fOrigen" aria-label="Origen"><option value="">Todas</option><option value="propia">Propias</option><option value="compartida">Compartidas</option></select>
+        <select id="fCat" aria-label="Categoría"></select>
+      </div>
+      <div class="split">
+        <div class="panel"><h3>Biblioteca <span class="muted" id="cuenta"></span></h3><ul class="list" id="lista" role="listbox" aria-label="Frases"></ul></div>
+        <div class="panel">
+          <h3 id="edTit">Editar frase</h3>
+          <div class="row"><div><label for="eT">Título</label><input id="eT"></div><div><label for="eA">Abreviatura</label><input id="eA"></div></div>
+          <div style="margin-bottom:10px"><label for="eC">Categoría</label><select id="eC"></select></div>
+          <label for="eX">Contenido</label><textarea id="eX"></textarea>
+          <div class="vars"><span class="muted" style="font-size:11px;font-weight:700">VARIABLES</span>
+            <button class="btn" data-var="nombre">{nombre}</button><button class="btn" data-var="pedido">{pedido}</button><button class="btn" data-var="fecha">{fecha}</button></div>
+          <label>Vista previa · datos de ejemplo</label><div class="preview" id="prev"></div>
+          <div class="err" id="eErr" role="alert"></div>
+          <div class="acts"><button class="btn" id="bFav">Marcar favorita</button><button class="btn" id="bDup">Duplicar</button><span class="sp"></span><button class="btn p" id="bGuardar">Guardar cambios</button></div>
+          <div class="acts"><button class="btn" id="bDel">Eliminar propia</button><button class="btn" id="bUndo" disabled>Deshacer</button><button class="btn" id="bCopiar">Completar y copiar</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Asistente -->
+    <section id="vAsist" class="hide">
+      <div class="head"><div><h2>Asistente en vivo</h2><div class="muted">Sugiere solo frases aprobadas del catálogo. El agente decide qué enviar.</div></div></div>
+      <div class="live">
+        <div>
+          <div class="sim" role="group" aria-label="Simular mensaje del cliente">
+            <span class="muted" style="align-self:center">Simular cliente:</span>
+            <button class="btn" data-esc="pedido">Pedido retrasado</button><button class="btn" data-esc="direccion">Cambio de dirección</button><button class="btn" data-esc="garantia">Garantía</button>
+          </div>
+          <div class="panel chat">
+            <header id="chatH">Carolina Rojas · en línea</header>
+            <div class="msgs" id="msgs" aria-live="polite"></div>
+            <form class="composer" id="fComp"><input id="comp" aria-label="Escribir un mensaje" placeholder="Escribir un mensaje…"><button class="btn p" type="submit">Enviar</button></form>
+          </div>
+        </div>
+        <div>
+          <div class="bar">
+            <div class="top"><div><b style="font-size:17px">FraseYa IA</b><div style="font-size:11.5px;color:#b9c7dd">Lectura del chat activo</div></div>
+              <div class="sw"><span id="swTxt">APAGADA</span><button id="sw" aria-pressed="false" aria-label="Activar lectura automática"></button></div></div>
+            <div class="tags" id="tags"></div>
+            <div style="font-size:11.5px;color:#b9c7dd" id="priv">Apagada: no se lee ni se envía nada. Al activarla solo se lee esta ventana de chat y no se guarda la conversación.</div>
+          </div>
+          <div class="cards" id="cards"></div>
+          <div class="note" id="notaIa" style="margin-top:8px"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="ov hide" role="dialog" aria-modal="true"></div>
+<div id="toast" role="status"></div>
+
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const MUESTRA={nombre:'Carolina',pedido:'1024',fecha:'15/10/2026'};
+let frases=[
+ {id:1,t:'Saludo inicial',a:'!hola',c:'Hola {nombre}, gracias por escribirnos. ¿En qué puedo ayudarle?',cat:'General',o:'compartida',fav:true},
+ {id:2,t:'Pedido retrasado',a:'!retraso',c:'Lamento la demora, {nombre}. Revisaré su pedido {pedido} y le confirmo el estado en unos minutos.',cat:'Pedidos',o:'propia',fav:true,tema:'pedido',tipo:'empatica'},
+ {id:3,t:'Solicitar número de pedido',a:'!npedido',c:'Gracias por avisarnos, {nombre}. ¿Me confirma su número de pedido para verificar dónde se encuentra?',cat:'Pedidos',o:'compartida',tema:'pedido',tipo:'directa'},
+ {id:4,t:'Escalar a logística',a:'!logistica',c:'Entiendo su molestia, {nombre}. Derivaré su caso {pedido} al área de logística para darle una solución hoy.',cat:'Pedidos',o:'compartida',tema:'pedido',tipo:'escalar'},
+ {id:5,t:'Cambio de dirección',a:'!direccion',c:'Con gusto, {nombre}. ¿Me indica la nueva dirección de entrega del pedido {pedido}?',cat:'Pedidos',o:'propia',tema:'direccion',tipo:'directa'},
+ {id:6,t:'Dirección: lamento el error',a:'!dirlamento',c:'Lamento el inconveniente, {nombre}. Corrijo la dirección del pedido {pedido} ahora mismo.',cat:'Pedidos',o:'compartida',tema:'direccion',tipo:'empatica'},
+ {id:7,t:'Dirección: escalar',a:'!direscala',c:'{nombre}, derivaré el cambio de dirección del pedido {pedido} al equipo de despacho para confirmarlo hoy.',cat:'Pedidos',o:'compartida',tema:'direccion',tipo:'escalar'},
+ {id:8,t:'Garantía del producto',a:'!garantia',c:'{nombre}, su producto está cubierto por garantía. ¿Me envía una foto y su número de pedido {pedido}?',cat:'Soporte',o:'compartida',tema:'garantia',tipo:'directa'},
+ {id:9,t:'Garantía: empatía',a:'!garemp',c:'Lamento que el producto presente fallas, {nombre}. Lo resolveremos con la garantía vigente.',cat:'Soporte',o:'compartida',tema:'garantia',tipo:'empatica'},
+ {id:10,t:'Garantía: escalar',a:'!garescala',c:'{nombre}, derivaré su caso de garantía al servicio técnico para coordinar la revisión.',cat:'Soporte',o:'compartida',tema:'garantia',tipo:'escalar'},
+ {id:11,t:'Cierre de atención',a:'!cierre',c:'Gracias por contactarnos, {nombre}. Quedo atento ante cualquier consulta. Hasta pronto.',cat:'General',o:'compartida'}
+];
+let cats=[{n:'General',c:'#64748B'},{n:'Pedidos',c:'#2f6fb3'},{n:'Soporte',c:'#8a4fc2'}];
+let sel=null,vista='frases',rol='usuario',offline=false,ultima=null,version=11,intentos=[],sigId=100;
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const sust=(t,v)=>t.replace(/\{(\w+)\}/g,(m,k)=>v[k]!==undefined&&v[k]!==''?v[k]:m);
+function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(()=>e.classList.remove('on'),2600)}
+
+/* ---- acceso ---- */
+$('#fLogin').addEventListener('submit',e=>{e.preventDefault();
+  const ahora=Date.now();intentos=intentos.filter(t=>ahora-t<60000);
+  if(intentos.length>=5){$('#lerr').textContent='Demasiados intentos. Espere un minuto.';return}
+  intentos.push(ahora);
+  const c=$('#correo').value.trim(),k=$('#clave').value;
+  if(!c||!k){$('#lerr').textContent='Ingrese correo y contraseña.';return}
+  if(!/^\S+@\S+\.\S+$/.test(c)){$('#lerr').textContent='El correo no es válido.';return}
+  rol=document.querySelector('input[name=rol]:checked').value;offline=false;entrar(c)});
+$('#offline').onclick=()=>{rol='usuario';offline=true;entrar('Modo sin conexión')};
+function entrar(quien){$('#login').classList.add('hide');$('#app').classList.remove('hide');$('#clave').value='';$('#lerr').textContent='';
+  $('#quien').textContent=quien;$('#rolTxt').textContent=offline?'sin conexión':rol;
+  const adm=rol==='administrador'&&!offline;$('#bPub').classList.toggle('hide',!adm);$('#bCat').classList.toggle('hide',!adm);
+  $('#sync').textContent=offline?'Modo sin conexión · copia local':'Catálogo central · versión '+version;
+  irA('frases');renderCats();renderLista()}
+$('#salir').onclick=()=>{$('#app').classList.add('hide');$('#login').classList.remove('hide');sel=null};
+
+/* ---- navegación ---- */
+function irA(v){vista=v;$$('.nav[data-v]').forEach(b=>b.setAttribute('aria-current',b.dataset.v===v?'page':'false'));
+  $('#vFrases').classList.toggle('hide',v==='asistente');$('#vAsist').classList.toggle('hide',v!=='asistente');
+  if(v!=='asistente'){$('#titulo').textContent=v==='favoritas'?'Favoritas':'Mis frases';renderLista()}else iniciarChat()}
+$$('.nav[data-v]').forEach(b=>b.onclick=()=>{if(b.dataset.v==='asistente'&&offline){toast('El asistente necesita conexión.');return}irA(b.dataset.v)});
+$$('.nav[data-fuera]').forEach(b=>b.onclick=()=>toast(b.dataset.fuera+': fuera del alcance de este prototipo.'));
+
+/* ---- biblioteca ---- */
+function renderCats(){const o=cats.map(c=>`<option>${esc(c.n)}</option>`).join('');$('#eC').innerHTML=o;
+  $('#fCat').innerHTML='<option value="">Todas las categorías</option>'+o}
+function filtradas(){const q=$('#q').value.toLowerCase(),o=$('#fOrigen').value,c=$('#fCat').value;
+  return frases.filter(f=>(vista!=='favoritas'||f.fav)&&(!o||f.o===o)&&(!c||f.cat===c)&&(!q||(f.t+f.a+f.c).toLowerCase().includes(q)))
+   .sort((a,b)=>(b.fav?1:0)-(a.fav?1:0)||a.t.localeCompare(b.t))}
+function renderLista(){const l=filtradas();$('#cuenta').textContent='('+l.length+')';
+  $('#lista').innerHTML=l.length?l.map(f=>`<li><button role="option" data-id="${f.id}" aria-selected="${sel&&sel.id===f.id}"><b>${f.fav?'★ ':''}${esc(f.t)}</b><span>${esc(f.a)} · ${f.o==='propia'?'Propia':'Compartida'} · ${esc(f.cat)}</span></button></li>`).join(''):'<li class="muted" style="padding:10px">Sin resultados. Pruebe con otra búsqueda.</li>';
+  $$('#lista button').forEach(b=>b.onclick=()=>elegir(+b.dataset.id))}
+['#q','#fOrigen','#fCat'].forEach(s=>$(s).addEventListener('input',renderLista));
+function elegir(id){sel=frases.find(f=>f.id===id);cargar();renderLista()}
+function cargar(){const f=sel,ro=f&&f.o==='compartida';
+  $('#eT').value=f?f.t:'';$('#eA').value=f?f.a:'';$('#eX').value=f?f.c:'';$('#eC').value=f?f.cat:cats[0].n;
+  ['#eT','#eA','#eX'].forEach(s=>$(s).readOnly=!!ro);$('#eC').disabled=!!ro;
+  $('#edTit').textContent=!f?'Nueva frase propia':(ro?'Frase compartida · solo lectura':'Editar frase');
+  $('#bGuardar').disabled=!!ro;$('#bDel').disabled=!f||ro;$('#bDup').disabled=!f;$('#bFav').disabled=!f;
+  $('#bFav').textContent=f&&f.fav?'Quitar favorita':'Marcar favorita';$('#eErr').textContent='';prev()}
+function prev(){$('#prev').textContent=sust($('#eX').value,MUESTRA)}
+$('#eX').addEventListener('input',prev);
+$$('[data-var]').forEach(b=>b.onclick=()=>{const t=$('#eX');if(t.readOnly)return toast('Las frases compartidas son de solo lectura.');
+  const v='{'+b.dataset.var+'}',s=t.selectionStart,e=t.selectionEnd;t.setRangeText(v,s,e,'end');t.focus();prev()});
+$('#nueva').onclick=()=>{sel=null;cargar();$('#eT').focus();renderLista()};
+$('#bGuardar').onclick=()=>{const t=$('#eT').value.trim(),a=$('#eA').value.trim(),c=$('#eX').value.trim();
+  if(!t||!a||!c)return $('#eErr').textContent='Complete título, abreviatura y contenido.';
+  if(/\s/.test(a))return $('#eErr').textContent='La abreviatura no puede tener espacios.';
+  if(frases.some(f=>f.a.toLowerCase()===a.toLowerCase()&&(!sel||f.id!==sel.id)))return $('#eErr').textContent='Esa abreviatura ya existe.';
+  if(sel){Object.assign(sel,{t,a,c,cat:$('#eC').value})}else{sel={id:++sigId,t,a,c,cat:$('#eC').value,o:'propia',fav:false};frases.push(sel)}
+  $('#eErr').textContent='';renderLista();cargar();toast('Frase guardada.')};
+$('#bFav').onclick=()=>{if(sel){sel.fav=!sel.fav;cargar();renderLista()}};
+$('#bDup').onclick=()=>{if(!sel)return;let a=sel.a+'2';while(frases.some(f=>f.a===a))a+='2';const n={...sel,id:++sigId,a,o:'propia',fav:false,t:sel.t+' (copia)'};frases.push(n);sel=n;cargar();renderLista();toast('Duplicada como frase propia.')};
+$('#bDel').onclick=()=>{if(!sel||sel.o!=='propia')return;ultima=sel;frases=frases.filter(f=>f!==sel);sel=null;cargar();renderLista();$('#bUndo').disabled=false;toast('Frase eliminada. Puede deshacerlo.')};
+$('#bUndo').onclick=()=>{if(!ultima)return;if(frases.some(f=>f.a.toLowerCase()===ultima.a.toLowerCase()))return toast('La abreviatura ya está ocupada.');frases.push(ultima);sel=ultima;ultima=null;$('#bUndo').disabled=true;cargar();renderLista();toast('Frase recuperada.')};
+$('#bCopiar').onclick=()=>{const t=$('#eX').value.trim();if(!t)return toast('No hay contenido para copiar.');formulario(t,txt=>{try{navigator.clipboard.writeText(txt)}catch(e){}toast('Texto copiado. Revíselo antes de pegarlo.')})};
+
+/* ---- formulario de variables ---- */
+function formulario(texto,alAceptar,iniciales={}){
+  const nombres=[...new Set([...texto.matchAll(/\{(\w+)\}/g)].map(m=>m[1]))];
+  if(!nombres.length){alAceptar(texto);return}
+  const m=$('#modal');m.classList.remove('hide');
+  m.innerHTML=`<div class="dlg"><h3>Completar frase</h3><div><label>Vista previa</label><div class="preview" id="fPrev"></div></div>
+   <div>${nombres.map(n=>`<div style="margin-bottom:8px"><label for="v_${n}">${n[0].toUpperCase()+n.slice(1)}</label><input id="v_${n}" value="${esc(iniciales[n]||'')}"></div>`).join('')}</div>
+   <div class="note">Los campos vacíos aparecen entre corchetes en la vista previa.</div>
+   <div class="acts"><button class="btn" id="fCan">Cancelar</button><span class="sp"></span><button class="btn p" id="fOk">Insertar</button></div></div>`;
+  const val=()=>Object.fromEntries(nombres.map(n=>[n,$('#v_'+n).value.trim()]));
+  const dib=foco=>{const v=val();$('#fPrev').innerHTML=esc(texto).replace(/\{(\w+)\}/g,(x,k)=>v[k]?`<span class="${k===foco?'hl':''}">${esc(v[k])}</span>`:`<span class="miss">[${k[0].toUpperCase()+k.slice(1)}]</span>`)};
+  nombres.forEach(n=>{$('#v_'+n).addEventListener('input',()=>dib(n));$('#v_'+n).addEventListener('focus',()=>dib(n))});
+  dib();$('#v_'+nombres[0]).focus();
+  const cerrar=()=>{m.classList.add('hide');m.innerHTML=''};
+  $('#fCan').onclick=cerrar;$('#fOk').onclick=()=>{alAceptar(sust(texto,val()));cerrar()};
+  m.onkeydown=e=>{if(e.key==='Escape')cerrar()}}
+
+/* ---- asistente en vivo ---- */
+const ESC={
+ pedido:{cliente:['Hola, hice un pedido hace 5 días y todavía no llega.','Es la tercera vez que escribo y nadie me responde. Estoy muy molesta.','Mi número de pedido es 1024. Necesito una solución hoy.'],tema:'Pedido retrasado',animo:2},
+ direccion:{cliente:['Buenas tardes, necesito cambiar la dirección de entrega.','Puse mal el número de la casa, por favor ayúdeme.'],tema:'Cambio de dirección',animo:0},
+ garantia:{cliente:['Hola, el producto que compré dejó de funcionar.','Me parece una falla de fábrica, quiero que lo cambien. Esto es un reclamo.'],tema:'Garantía del producto',animo:1}};
+const ANIMO=[['Tranquila','#2e9e6a','Urgencia baja','#2e9e6a'],['Molesta','#d64545','Urgencia media','#e08a1e'],['Muy molesta','#d64545','Urgencia alta','#b3261e']];
+const TIPOS={empatica:['Empática','#2e9e6a'],directa:['Directa','#2f6fb3'],escalar:['Escalar','#8a4fc2']};
+let lectura=false,tema=null,cliente='Carolina',pedidoDet='',alt={};
+function iniciarChat(){$('#msgs').innerHTML='';$('#cards').innerHTML='';$('#tags').innerHTML='';$('#notaIa').textContent=lectura?'':'Active la lectura para recibir sugerencias.';tema=null;pedidoDet=''}
+$('#sw').onclick=()=>{lectura=!lectura;$('#sw').setAttribute('aria-pressed',lectura);$('#swTxt').textContent=lectura?'ACTIVA':'APAGADA';
+  $('#priv').textContent=lectura?'Activa: solo se lee esta ventana de chat. La conversación no se guarda y nada se envía sin su decisión.':'Apagada: no se lee ni se envía nada. Al activarla solo se lee esta ventana de chat y no se guarda la conversación.';
+  if(!lectura){$('#cards').innerHTML='';$('#tags').innerHTML=''}$('#notaIa').textContent=lectura?'Elija un mensaje de cliente para simular.':'Active la lectura para recibir sugerencias.'};
+function msg(t,me){const d=document.createElement('div');d.className='m'+(me?' me':'');d.textContent=t;$('#msgs').append(d);$('#msgs').scrollTop=1e5}
+$$('[data-esc]').forEach(b=>b.onclick=()=>{if(!lectura){toast('Active primero la lectura automática.');return}
+  const e=ESC[b.dataset.esc];$('#msgs').innerHTML='';e.cliente.forEach(t=>msg(t,false));tema=b.dataset.esc;
+  const mm=e.cliente.join(' ').match(/\b\d{3,}\b/);pedidoDet=mm?mm[0]:'';
+  analizar(e)});
+function analizar(e){const a=ANIMO[e.animo];$('#tags').innerHTML=`<span class="pill" style="background:#ffffff30">Tema: ${e.tema}</span><span class="pill" style="background:${a[1]}">Ánimo: ${a[0]}</span><span class="pill" style="background:${a[3]}">${a[2]}</span>`;
+  const orden=e.animo>0?['empatica','directa','escalar']:['directa','empatica','escalar'];alt={};
+  $('#cards').innerHTML='';orden.forEach((tp,i)=>{const op=frases.filter(f=>f.tema===tema&&f.tipo===tp);if(op.length)tarjeta(tp,op[0],i)});
+  $('#notaIa').textContent='Sugerencias tomadas del catálogo aprobado. Puede mover las ventanas.'}
+function tarjeta(tp,f,i){const [n,c]=TIPOS[tp];const d=document.createElement('div');d.className='card';d.style.setProperty('--c',c);d.dataset.tp=tp;
+  d.innerHTML=`<div class="h"><span>Sugerencia ${i+1} · ${n}</span><button aria-label="Cerrar sugerencia">✕</button></div><div class="b"><div class="txt"></div><div class="a"><button class="btn p">Usar</button><button class="btn">Editar</button><span class="muted" style="margin-left:auto;font-size:12px">${esc(f.t)}</span></div></div>`;
+  d._f=f;d.querySelector('.txt').textContent=sust(f.c,{nombre:cliente,pedido:pedidoDet});
+  d.querySelector('.h button').onclick=()=>d.remove();
+  const usar=edit=>{formularioSiFalta(f,txt=>{$('#comp').value=txt;$('#comp').focus();toast(edit?'Edite el texto antes de enviar.':'Texto en el cuadro de mensaje. Revíselo y envíe.')})};
+  const [bu,be]=d.querySelectorAll('.a .btn');bu.onclick=()=>usar(false);be.onclick=()=>usar(true);
+  $('#cards').append(d);arrastrable(d)}
+function formularioSiFalta(f,cb){const base=sust(f.c,{nombre:cliente,pedido:pedidoDet});if(/\{\w+\}/.test(base))formulario(base,cb,{});else cb(base)}
+function arrastrable(d){const h=d.querySelector('.h');let ox=0,oy=0,mov=false;
+  h.addEventListener('pointerdown',e=>{if(e.target.tagName==='BUTTON'||innerWidth<=900)return;mov=true;const r=d.getBoundingClientRect();ox=e.clientX-r.left;oy=e.clientY-r.top;d.style.position='fixed';d.style.width=r.width+'px';d.style.left=r.left+'px';d.style.top=r.top+'px';d.style.zIndex=10;h.setPointerCapture(e.pointerId)});
+  h.addEventListener('pointermove',e=>{if(mov){d.style.left=e.clientX-ox+'px';d.style.top=e.clientY-oy+'px'}});
+  h.addEventListener('pointerup',()=>mov=false)}
+$('#fComp').addEventListener('submit',e=>{e.preventDefault();const t=$('#comp').value.trim();if(!t)return;msg(t,true);$('#comp').value='';toast('Mensaje enviado por el agente.')});
+
+/* ---- administración ---- */
+$('#bPub').onclick=()=>{const prop=frases.filter(f=>f.o==='propia').length;const m=$('#modal');m.classList.remove('hide');
+  m.innerHTML=`<div class="dlg"><h3>Confirmar publicación</h3><div><b>Versión ${version+1}</b> · ${frases.length} frases en ${cats.length} categorías</div>
+  <div class="kpis"><div><b style="color:var(--ok)">${prop}</b>Nuevas</div><div><b style="color:var(--warn)">2</b>Modificadas</div><div><b style="color:var(--bad)">1</b>Eliminadas</div></div>
+  <div class="note">El servidor validará su rol, el hash y la versión vigente. Si otro administrador publicó antes, deberá preparar una nueva vista previa.</div>
+  <div class="acts"><button class="btn" id="pCan">Cancelar</button><span class="sp"></span><button class="btn p" id="pOk">Publicar</button></div></div>`;
+  $('#pCan').onclick=()=>{m.classList.add('hide');m.innerHTML=''};
+  $('#pOk').onclick=()=>{version++;$('#sync').textContent='Catálogo central · versión '+version;m.classList.add('hide');m.innerHTML='';toast('Publicado: versión '+version)}};
+$('#bCat').onclick=()=>{const m=$('#modal');m.classList.remove('hide');
+  const dib=()=>{m.innerHTML=`<div class="dlg"><h3>Categorías · administrador</h3><div>${cats.map(c=>`<div style="padding:6px 0"><span class="dot" style="background:${c.c}"></span>${esc(c.n)} <span class="muted">(${frases.filter(f=>f.cat===c.n).length} frases)</span></div>`).join('')}</div>
+   <div class="row"><div><label for="nc">Nueva categoría</label><input id="nc" placeholder="Nombre"></div><div><label for="cc">Color</label><input id="cc" type="color" value="#2e9e6a" style="padding:2px;height:40px"></div></div>
+   <div class="err" id="cErr" role="alert"></div><div class="acts"><button class="btn" id="cCer">Cerrar</button><span class="sp"></span><button class="btn p" id="cAdd">Crear</button></div></div>`;
+   $('#cCer').onclick=()=>{m.classList.add('hide');m.innerHTML='';renderCats()};
+   $('#cAdd').onclick=()=>{const n=$('#nc').value.trim();if(!n)return $('#cErr').textContent='Escriba un nombre.';if(cats.some(c=>c.n.toLowerCase()===n.toLowerCase()))return $('#cErr').textContent='Esa categoría ya existe.';cats.push({n,c:$('#cc').value});dib()}};dib()};
+$('#modal').addEventListener('click',e=>{if(e.target.id==='modal'){e.target.classList.add('hide');e.target.innerHTML=''}});
+</script>
+</body>
+</html>

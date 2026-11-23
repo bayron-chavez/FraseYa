@@ -1,5 +1,6 @@
 """Teclado global y motor existente, con puente al hilo principal Qt."""
 import queue
+import time
 from threading import Event,Thread
 from PySide6.QtCore import QTimer,Qt
 from PySide6.QtWidgets import QApplication,QDialog,QVBoxLayout,QLineEdit,QListWidget,QListWidgetItem
@@ -9,6 +10,15 @@ from fraseya.infraestructura.escritor_texto import EscritorTexto
 from fraseya.infraestructura.teclado_global import TecladoGlobal,ventana_activa,activar_ventana,forzar_primer_plano
 from .qt_dialogos import completar_variables
 from .qt_vista import ESTILO
+
+
+def _estilo_actual():
+    app = QApplication.instance()
+    if app is not None:
+        qss = app.styleSheet()
+        if qss:
+            return qss
+    return ESTILO
 
 
 class PuenteQt:
@@ -46,15 +56,23 @@ class ExpansionQt:
     def __init__(self,ventana,repo):
         self.ventana=ventana; self.puente=PuenteQt(ventana); self.catalogo=[]; self.pausado=False
         ajustes=Configuracion(repo).leer(); self.escritor=EscritorTexto(ajustes.velocidad_ms)
-        pedir=lambda nombres,iniciales:self.puente.llamar(lambda:completar_variables(ventana,' '.join('{'+n+'}' for n in nombres),nombres,iniciales))
-        contexto=lambda nombres,iniciales,contenido:self.puente.llamar(lambda:completar_variables(ventana,contenido,nombres,iniciales))
+        pedir=lambda nombres,iniciales:self.puente.llamar(lambda:completar_variables(None,' '.join('{'+n+'}' for n in nombres),nombres,iniciales,flotante=True))
+        contexto=lambda nombres,iniciales,contenido:self.puente.llamar(lambda:completar_variables(None,contenido,nombres,iniciales,flotante=True))
         self.motor=MotorExpansion(self.escritor,pedir,ventana_activa,activar_ventana,pedir_con_contexto=contexto)
         self.recargar(); self.teclado=TecladoGlobal(self.motor,ajustes.tecla_confirmacion,ajustes.atajo_buscador)
         self.teclado.al_atajo=self.atajo
         self.timer=QTimer(ventana); self.timer.timeout.connect(self.actualizar_pausa); self.timer.start(30)
         # Nunca expandir teclas en los campos propios, contraseña incluida.
         QApplication.instance().focusWindowChanged.connect(self.actualizar_pausa)
-        self.teclado.iniciar(); ventana.al_cambiar=self.recargar
+        self.teclado.iniciar()
+        anterior_cambiar = ventana.al_cambiar
+
+        def _al_cambiar_encadenado():
+            self.recargar()
+            if anterior_cambiar:
+                anterior_cambiar()
+
+        ventana.al_cambiar = _al_cambiar_encadenado
 
     def actualizar_pausa(self,*_):
         self.teclado.pausado=self.pausado or QApplication.activeWindow() is not None
@@ -65,12 +83,44 @@ class ExpansionQt:
     def aplicar(self,a):
         self.escritor.velocidad_ms=a.velocidad_ms; self.teclado.configurar(a.tecla_confirmacion,a.atajo_buscador)
 
+    def insertar_texto_en_ventana(self, texto, hwnd_destino=None, enfocar_destino=None):
+        """Inserta texto en la ventana indicada usando MotorExpansion (nunca pulsa Enter).
+
+        Si `enfocar_destino` se entrega (callback opcional), tras activar la ventana de
+        destino espera brevemente (~80 ms) y llama a `enfocar_destino()` para enfocar el
+        cuadro de escritura antes de insertar.
+        """
+        if not isinstance(texto, str) or not texto:
+            return False
+        destino = hwnd_destino if hwnd_destino is not None else ventana_activa()
+        if enfocar_destino is None:
+            return bool(self.motor.insertar(texto, destino))
+
+        def _enfocar_con_pausa():
+            if destino:
+                try:
+                    activar_ventana(destino)
+                except Exception:
+                    pass
+                time.sleep(0.12)
+            try:
+                enfocar_destino()
+                time.sleep(0.40)
+            except Exception:
+                pass
+
+        try:
+            return bool(self.motor.insertar(texto, destino, antes_de_escribir=_enfocar_con_pausa))
+        except TypeError:
+            _enfocar_con_pausa()
+            return bool(self.motor.insertar(texto, destino))
+
     def atajo(self):
         origen=ventana_activa(); self.puente.publicar(lambda:self.buscador(origen))
 
     def buscador(self,origen):
         self.pausado=True; self.actualizar_pausa()
-        d=QDialog(self.ventana); d.setStyleSheet(ESTILO); d.setWindowTitle('Buscar e insertar frase'); d.resize(600,420)
+        d=QDialog(None); d.setWindowFlags(d.windowFlags() | Qt.WindowStaysOnTopHint); d.setStyleSheet(_estilo_actual()); d.setWindowTitle('Buscar e insertar frase'); d.resize(600,420)
         layout=QVBoxLayout(d); buscar=QLineEdit(); buscar.setPlaceholderText('Buscar frase…'); layout.addWidget(buscar)
         lista=QListWidget(); layout.addWidget(lista); seleccion=[]
         def filtrar():
@@ -83,8 +133,11 @@ class ExpansionQt:
             if lista.currentItem(): seleccion.append(lista.currentItem().data(Qt.UserRole)); d.accept()
         lista.itemDoubleClicked.connect(aceptar); buscar.returnPressed.connect(aceptar); buscar.textChanged.connect(filtrar); filtrar()
         d.show(); forzar_primer_plano(int(d.winId())); buscar.setFocus(); d.exec()
-        self.pausado=False; self.actualizar_pausa(); activar_ventana(origen)
-        if seleccion: Thread(target=lambda:self.motor.insertar(seleccion[0]['contenido'],origen),daemon=True).start()
+        self.pausado=False; self.actualizar_pausa()
+        if seleccion:
+            Thread(target=lambda:(activar_ventana(origen),time.sleep(0.18),self.motor.insertar(seleccion[0]['contenido'],origen)),daemon=True).start()
+        else:
+            activar_ventana(origen)
 
     def detener(self):
         self.timer.stop(); self.teclado.detener(); self.puente.detener()

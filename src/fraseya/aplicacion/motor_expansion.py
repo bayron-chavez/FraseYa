@@ -77,20 +77,20 @@ class MotorExpansion:
         self._lanzar(lambda: self._insertar(contenido, ventana, len(abreviatura)))
         return True
 
-    def insertar(self, contenido, ventana):
-        """Escribe una frase elegida a mano (buscador rápido) en `ventana`, sin borrar nada.
+    def insertar(self, contenido, ventana, *, antes_de_escribir=None):
+        """Escribe una frase elegida a mano (buscador rápido o tarjeta flotante) en `ventana`.
 
-        Devuelve False si ya hay una inserción en curso.
+        Devuelve False si ya hay una inserción en curso. Nunca pulsa Enter/Enviar.
         """
         if self._ocupado:
             return False
         self.reiniciar()
         self._ocupado = True
-        self._lanzar(lambda: self._insertar(contenido, ventana, 0, devolver_foco=True))
+        self._lanzar(lambda: self._insertar(contenido, ventana, 0, devolver_foco=True, antes_de_escribir=antes_de_escribir))
         return True
 
     # ---- escritura ------------------------------------------------------
-    def _insertar(self, contenido, ventana, borrar, devolver_foco=False):
+    def _insertar(self, contenido, ventana, borrar, devolver_foco=False, antes_de_escribir=None):
         """Resuelve los campos variables y escribe el texto en `ventana`.
 
         borrar: caracteres a borrar antes (la abreviatura). devolver_foco: hay que
@@ -109,6 +109,12 @@ class MotorExpansion:
             if (tiene_campos or devolver_foco) and ventana:
                 self._activar_ventana(ventana)       # el formulario o el buscador le quitaron el foco
                 time.sleep(PAUSA_TRAS_FORMULARIO_S)
+            if callable(antes_de_escribir):
+                try:
+                    antes_de_escribir()
+                    time.sleep(0.08)
+                except Exception:
+                    pass
             self.escritor.reemplazar(borrar, texto)
         finally:
             self._ocupado = False

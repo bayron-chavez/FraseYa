@@ -641,8 +641,9 @@ def abrir(ruta=None, con_teclado=True, autenticacion=None, sesion=None):
 
 def _abrir_autenticado(ruta, con_teclado, autenticacion, sesion):
     """Abre la ventana principal; con_teclado=False no captura el teclado (solo gestionar frases)."""
+    from fraseya.aplicacion.sesion import ruta_bd_sesion
     from fraseya.infraestructura import RepositorioSQLite
-    with RepositorioSQLite(ruta) as repo:
+    with RepositorioSQLite(ruta_bd_sesion(ruta, sesion)) as repo:
         ventana = VentanaPrincipal(GestionFrases(repo), autenticacion=autenticacion, sesion=sesion)
         expansion = None
         if con_teclado:

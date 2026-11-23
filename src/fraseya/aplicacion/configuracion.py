@@ -1,4 +1,4 @@
-"""RF-11: ajustes del usuario (atajo, tecla de confirmación, velocidad, sincronización).
+"""RF-11: ajustes del usuario (atajo, tecla de confirmación, velocidad, sincronización, tema).
 
 Se guardan como clave/valor en la tabla CONFIGURACION. Un valor inválido o
 ausente se reemplaza por el predeterminado al leer, y al guardar se informan
@@ -13,6 +13,8 @@ from fraseya.infraestructura.teclado_global import (ATAJO_PREDETERMINADO, TECLA_
 from .gestion_frases import ErroresValidacion
 
 INTERVALO_MIN, INTERVALO_MAX, INTERVALO_PREDETERMINADO = 1, 1440, 15
+TEMAS_VALIDOS = ('claro', 'oscuro')
+TEMA_PREDETERMINADO = 'claro'
 
 # Con Ctrl+Alt (AltGr en muchos teclados) las letras y los dígitos escriben símbolos
 # (@, €…): un atajo ahí se dispararía al teclear.
@@ -37,6 +39,7 @@ class Ajustes:
     atajo_buscador: str = ATAJO_PREDETERMINADO
     velocidad_ms: int = VELOCIDAD_PREDETERMINADA_MS
     intervalo_sincronizacion_min: int = INTERVALO_PREDETERMINADO
+    tema: str = TEMA_PREDETERMINADO
 
 
 CAMPOS = tuple(Ajustes.__dataclass_fields__)
@@ -134,6 +137,13 @@ class Configuracion:
                                f'{INTERVALO_MIN} y {INTERVALO_MAX}.')
             else:
                 nuevos['intervalo_sincronizacion_min'] = intervalo
+
+        if 'tema' in valores:
+            tema = '' if valores['tema'] is None else str(valores['tema']).strip().lower()
+            if tema in TEMAS_VALIDOS:
+                nuevos['tema'] = tema
+            else:
+                errores.append(f'El tema debe ser: {", ".join(TEMAS_VALIDOS)}.')
 
         if errores:
             raise ErroresValidacion(errores)

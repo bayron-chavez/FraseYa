@@ -105,7 +105,12 @@ def ventana_activa():
 
 def activar_ventana(ventana):
     """Devuelve el foco a una ventana (después de que el formulario se lo quitó)."""
-    _user32().SetForegroundWindow(ventana)
+    if not ventana:
+        return
+    try:
+        forzar_primer_plano(ventana)
+    except Exception:
+        _user32().SetForegroundWindow(ventana)
 
 
 class TecladoGlobal:

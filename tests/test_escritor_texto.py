@@ -86,3 +86,27 @@ def test_backend_windows_se_construye_y_tiene_tamano_de_input_correcto():
     from fraseya.infraestructura.escritor_texto import TecladoWindows
     t = TecladoWindows()
     assert ctypes.sizeof(t._INPUT) == (40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28)
+
+
+def test_usa_pegar_texto_en_bloques_largos_y_hace_fallback_si_falla():
+    class TecladoConPegado(TecladoFalso):
+        def __init__(self, resultado):
+            super().__init__()
+            self.resultado = resultado
+            self.pegados = []
+
+        def pegar_texto(self, texto):
+            self.pegados.append(texto)
+            return self.resultado
+
+    t_ok = TecladoConPegado(True)
+    e_ok = EscritorTexto(20, teclado=t_ok, pausa=lambda *_: None)
+    e_ok.escribir('Hola, respuesta completa lista.')
+    assert t_ok.pegados == ['Hola, respuesta completa lista.']
+    assert t_ok.eventos == []
+
+    t_fail = TecladoConPegado(False)
+    e_fail = EscritorTexto(20, teclado=t_fail, pausa=lambda *_: None)
+    e_fail.escribir('Texto con respaldo')
+    assert t_fail.pegados == ['Texto con respaldo']
+    assert ''.join(v for k, v in t_fail.eventos if k == 'c') == 'Texto con respaldo'

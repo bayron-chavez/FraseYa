@@ -36,3 +36,20 @@ def test_generacion_pide_modo_y_no_admite_sql_o_campos_extra():
     frases = [dict(id=1, titulo='Base', categoria='General', contenido='Hola')]
     assert servicio.generar('Necesito ayuda', frases)['contenido'] == 'Hola {nombre}'
     assert cliente.solicitar.call_args.args[2]['modo'] == 'generar'
+
+
+def test_generacion_funciona_con_catalogo_vacio():
+    cliente = Mock()
+    cliente.solicitar.return_value = dict(
+        titulo='Consulta fuera de rubro',
+        categoria='General',
+        contenido='Hola, nos dedicamos a automatización y software; no ofrecemos sushi.',
+    )
+    servicio = RecomendadorIA(cliente)
+    salida = servicio.generar('Quiero comprar sushi', [])
+    assert salida['categoria'] == 'General'
+    assert cliente.solicitar.call_args.args[2] == {
+        'mensaje': 'Quiero comprar sushi',
+        'frases': [],
+        'modo': 'generar',
+    }

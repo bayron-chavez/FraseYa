@@ -13,7 +13,7 @@ class Sugerencia:
     motivo: str
 
 
-def preparar(mensaje, frases):
+def preparar(mensaje, frases, permitir_vacio=False):
     if not isinstance(mensaje, str) or not mensaje.strip() or len(mensaje) > 4000:
         raise ValueError('Escribe un mensaje de entre 1 y 4.000 caracteres.')
     palabras = set(re.findall(r'\w{3,}', normalizar(mensaje)))
@@ -22,7 +22,7 @@ def preparar(mensaje, frases):
         coincidencias = len(palabras & set(re.findall(r'\w{3,}', texto)))
         return (-coincidencias, not frase.get('favorita', False), frase['id'])
     elegidas = sorted(frases, key=puntuacion)[:40]
-    if not elegidas:
+    if not elegidas and not permitir_vacio:
         raise ValueError('Guarda o sincroniza algunas frases antes de pedir sugerencias.')
     candidatas = [{'id': f['id'], 'titulo': f['titulo'][:200],
                   'categoria': f.get('categoria', '')[:200], 'contenido': f['contenido'][:1600]}
@@ -39,7 +39,7 @@ class RecomendadorIA:
         self.limite = LimiteAcceso()
 
     def generar(self, mensaje, frases):
-        pedido, _ = preparar(mensaje, frases)
+        pedido, _ = preparar(mensaje, frases, permitir_vacio=True)
         pedido['modo'] = 'generar'
         self.limite.reservar()
         respuesta = self.cliente.solicitar('POST', '/functions/v1/fraseya-ia', pedido)

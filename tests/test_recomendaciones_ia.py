@@ -58,3 +58,14 @@ def test_servicio_no_configurado_mensaje_claro():
     cliente = Mock(); cliente.solicitar.side_effect = ErrorSupabase('Error genérico', 503)
     with pytest.raises(ErrorSupabase, match='configurada'):
         RecomendadorIA(cliente).sugerir('Pedido', frases())
+
+
+def test_preparar_conserva_turnos_cliente_agente_en_mensaje():
+    catalogo = [
+        dict(frases()[0], id=1, titulo='Pedido', contenido='Tu pedido llegará el {fecha}.'),
+        dict(frases()[0], id=2, titulo='Cliente VIP', contenido='Atención preferencial para el cliente y agente.'),
+    ]
+    hilo = 'Cliente: Hola\nAgente: ¿En qué te ayudo?\nCliente: ¿Dónde está mi pedido?'
+    pedido, _ = preparar(hilo, catalogo)
+    assert pedido['mensaje'] == hilo
+    assert pedido['frases'][0]['id'] == 1

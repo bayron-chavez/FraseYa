@@ -141,6 +141,22 @@ def test_interpretar_atajo(texto, esperado):
     assert tg.interpretar_atajo(texto) == esperado
 
 
+def test_armar_pegado_al_clic_ejecuta_una_sola_vez_al_soltar_izquierdo():
+    import threading
+    t = teclado()
+    ev = threading.Event()
+    llamadas = []
+    t.armar_pegado_al_clic(lambda: (llamadas.append(True), ev.set()), timeout_seg=5.0)
+    t._al_clic_raton(100, 100, SimpleNamespace(name='left'), True)   # pressed=True no dispara todavía
+    assert llamadas == []
+    t._al_clic_raton(100, 100, SimpleNamespace(name='left'), False)  # pressed=False sí dispara
+    assert ev.wait(timeout=2.0)
+    assert llamadas == [True]
+    # Un segundo clic ya no vuelve a disparar
+    t._al_clic_raton(100, 100, SimpleNamespace(name='left'), False)
+    assert len(llamadas) == 1
+
+
 @pytest.mark.parametrize('texto', ['', 'espacio', 'k', 'ctrl+', 'ctrl+ctrl+k', 'super+k',
                                    'ctrl+f13', 'ctrl+ñ', 'ctrl+dos'])
 def test_atajos_no_validos(texto):

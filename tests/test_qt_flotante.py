@@ -428,6 +428,35 @@ def test_compatibilidad_dict_aviso_y_texto_largo(app):
         app.processEvents()
 
 
+def test_ocultar_temporalmente_preserva_tarjetas_al_volver_a_whatsapp(app):
+    ctrl = ControladorFlotanteQt()
+    try:
+        ctrl.mostrar_sugerencias(_resultado_ejemplo(), rect_chat=(40, 40, 820, 620))
+        app.processEvents()
+        assert len(ctrl.tarjetas) == 3
+        assert ctrl.esta_visible() is True
+
+        # Al cambiar de ventana, se oculta sin borrar las tarjetas ni su contenido
+        ctrl.ocultar_temporalmente()
+        app.processEvents()
+        assert ctrl.esta_visible() is False
+        assert len(ctrl.tarjetas) == 3
+        assert not ctrl.barra.isVisible()
+        assert all(not t.isVisible() for t in ctrl.tarjetas)
+
+        # Al volver a WhatsApp, mostrar_barra restaura la barra y las mismas 3 tarjetas
+        ctrl.mostrar_barra(rect_chat=(60, 60, 840, 640))
+        app.processEvents()
+        assert ctrl.esta_visible() is True
+        assert ctrl.barra.isVisible()
+        assert len(ctrl.tarjetas) == 3
+        assert all(t.isVisible() for t in ctrl.tarjetas)
+        assert 'Pedido' in ctrl.barra.chip_tema.text()
+    finally:
+        ctrl.detener()
+        app.processEvents()
+
+
 def test_limpiar_contexto_borra_chips_demo_y_reajusta_aviso(app):
     ctrl = ControladorFlotanteQt()
     try:

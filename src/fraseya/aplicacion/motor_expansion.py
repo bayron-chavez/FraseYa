@@ -77,7 +77,7 @@ class MotorExpansion:
         self._lanzar(lambda: self._insertar(contenido, ventana, len(abreviatura)))
         return True
 
-    def insertar(self, contenido, ventana, *, antes_de_escribir=None):
+    def insertar(self, contenido, ventana, *, antes_de_escribir=None, al_terminar=None):
         """Escribe una frase elegida a mano (buscador rápido o tarjeta flotante) en `ventana`.
 
         Devuelve False si ya hay una inserción en curso. Nunca pulsa Enter/Enviar.
@@ -86,16 +86,25 @@ class MotorExpansion:
             return False
         self.reiniciar()
         self._ocupado = True
-        self._lanzar(lambda: self._insertar(contenido, ventana, 0, devolver_foco=True, antes_de_escribir=antes_de_escribir))
+        self._lanzar(lambda: self._insertar(
+            contenido,
+            ventana,
+            0,
+            devolver_foco=True,
+            antes_de_escribir=antes_de_escribir,
+            al_terminar=al_terminar,
+        ))
         return True
 
     # ---- escritura ------------------------------------------------------
-    def _insertar(self, contenido, ventana, borrar, devolver_foco=False, antes_de_escribir=None):
+    def _insertar(self, contenido, ventana, borrar, devolver_foco=False, antes_de_escribir=None, al_terminar=None):
         """Resuelve los campos variables y escribe el texto en `ventana`.
 
         borrar: caracteres a borrar antes (la abreviatura). devolver_foco: hay que
         reactivar la ventana aunque no haya formulario (el buscador le quitó el foco).
         """
+        ok_final = False
+        error_final = None
         try:
             tiene_campos = bool(resolver_variables.detectar(contenido))
             pedir = self._pedir_valores
@@ -105,19 +114,31 @@ class MotorExpansion:
             if texto is None:        # canceló el formulario: no se escribe ni borra nada
                 if devolver_foco and ventana:
                     self._activar_ventana(ventana)
+                error_final = 'cancelado'
                 return
             if (tiene_campos or devolver_foco) and ventana:
                 self._activar_ventana(ventana)       # el formulario o el buscador le quitaron el foco
                 time.sleep(PAUSA_TRAS_FORMULARIO_S)
             if callable(antes_de_escribir):
                 try:
-                    antes_de_escribir()
+                    foco_ok = antes_de_escribir()
+                    if foco_ok is False:
+                        error_final = 'sin_foco'
+                        return
                     time.sleep(0.08)
                 except Exception:
                     pass
             self.escritor.reemplazar(borrar, texto)
+            ok_final = True
+        except Exception as error:
+            error_final = str(error) or 'error_escritura'
         finally:
             self._ocupado = False
+            if callable(al_terminar):
+                try:
+                    al_terminar(ok_final, error_final)
+                except Exception:
+                    pass
 
     @staticmethod
     def _lanzar_en_hilo(trabajo):

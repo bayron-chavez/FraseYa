@@ -134,11 +134,11 @@ class TecladoWindows:
             return False
 
         abierto = False
-        for _ in range(5):
+        for _ in range(10):
             if u.OpenClipboard(None):
                 abierto = True
                 break
-            time.sleep(0.02)
+            time.sleep(0.025)
         if not abierto:
             return False
 

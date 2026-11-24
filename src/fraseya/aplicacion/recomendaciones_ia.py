@@ -16,7 +16,8 @@ class Sugerencia:
 def preparar(mensaje, frases, permitir_vacio=False):
     if not isinstance(mensaje, str) or not mensaje.strip() or len(mensaje) > 4000:
         raise ValueError('Escribe un mensaje de entre 1 y 4.000 caracteres.')
-    palabras = set(re.findall(r'\w{3,}', normalizar(mensaje)))
+    texto_busqueda = re.sub(r'(?im)^(?:cliente|agente)\s*:\s*', '', mensaje)
+    palabras = set(re.findall(r'\w{3,}', normalizar(texto_busqueda)))
     def puntuacion(frase):
         texto = normalizar(' '.join(str(frase.get(c, '')) for c in ('titulo', 'categoria', 'contenido')))
         coincidencias = len(palabras & set(re.findall(r'\w{3,}', texto)))

@@ -83,18 +83,55 @@ class ExpansionQt:
     def aplicar(self,a):
         self.escritor.velocidad_ms=a.velocidad_ms; self.teclado.configurar(a.tecla_confirmacion,a.atajo_buscador)
 
-    def insertar_texto_en_ventana(self, texto, hwnd_destino=None, enfocar_destino=None):
+    def desarmar_pegado_al_clic(self):
+        if hasattr(self.teclado, 'desarmar_pegado_al_clic'):
+            self.teclado.desarmar_pegado_al_clic()
+
+    def armar_pegado_al_clic(self, texto, hwnd_destino=None, al_pegar=None, timeout_seg=10.0):
+        """Espera un único clic en WhatsApp y pega la frase al soltar el botón."""
+        if not isinstance(texto, str) or not texto or not hasattr(self.teclado, 'armar_pegado_al_clic'):
+            return False
+
+        def _al_clic():
+            time.sleep(0.08)
+            try:
+                from fraseya.infraestructura.lector_chat import LectorChat
+                activa = ventana_activa()
+                es_destino = bool(hwnd_destino and activa == hwnd_destino)
+                if not es_destino:
+                    es_destino = LectorChat().ventana_whatsapp_activa() is not None
+                if not es_destino:
+                    if callable(al_pegar):
+                        al_pegar(False, 'fuera_whatsapp')
+                    return
+                self.escritor.escribir(texto)
+                if callable(al_pegar):
+                    al_pegar(True, None)
+            except Exception as err:
+                if callable(al_pegar):
+                    al_pegar(False, str(err) or 'error_pegado')
+
+        self.teclado.armar_pegado_al_clic(_al_clic, timeout_seg=timeout_seg)
+        return True
+
+    def insertar_texto_en_ventana(self, texto, hwnd_destino=None, enfocar_destino=None, al_terminar=None):
         """Inserta texto en la ventana indicada usando MotorExpansion (nunca pulsa Enter).
 
         Si `enfocar_destino` se entrega (callback opcional), tras activar la ventana de
-        destino espera brevemente (~80 ms) y llama a `enfocar_destino()` para enfocar el
+        destino espera brevemente (~120 ms) y llama a `enfocar_destino()` para enfocar el
         cuadro de escritura antes de insertar.
         """
         if not isinstance(texto, str) or not texto:
             return False
         destino = hwnd_destino if hwnd_destino is not None else ventana_activa()
+        kwargs = {}
+        if al_terminar is not None:
+            kwargs['al_terminar'] = al_terminar
         if enfocar_destino is None:
-            return bool(self.motor.insertar(texto, destino))
+            try:
+                return bool(self.motor.insertar(texto, destino, **kwargs))
+            except TypeError:
+                return bool(self.motor.insertar(texto, destino))
 
         def _enfocar_con_pausa():
             if destino:
@@ -104,16 +141,25 @@ class ExpansionQt:
                     pass
                 time.sleep(0.12)
             try:
-                enfocar_destino()
+                ok_foco = bool(enfocar_destino())
                 time.sleep(0.40)
+                return ok_foco
             except Exception:
-                pass
+                return False
 
         try:
-            return bool(self.motor.insertar(texto, destino, antes_de_escribir=_enfocar_con_pausa))
+            return bool(self.motor.insertar(
+                texto,
+                destino,
+                antes_de_escribir=_enfocar_con_pausa,
+                **kwargs,
+            ))
         except TypeError:
-            _enfocar_con_pausa()
-            return bool(self.motor.insertar(texto, destino))
+            try:
+                return bool(self.motor.insertar(texto, destino, antes_de_escribir=_enfocar_con_pausa))
+            except TypeError:
+                _enfocar_con_pausa()
+                return bool(self.motor.insertar(texto, destino))
 
     def atajo(self):
         origen=ventana_activa(); self.puente.publicar(lambda:self.buscador(origen))

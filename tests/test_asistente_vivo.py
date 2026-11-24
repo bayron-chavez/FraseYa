@@ -11,8 +11,12 @@ from fraseya.aplicacion.asistente_vivo import (
     OpcionFlotante,
     ResultadoVivo,
     ServicioAsistenteVivo,
+    _variar_por_tono,
     clasificar_contexto,
     crear_resultado_demo,
+    es_consulta_compuesta,
+    es_primer_contacto,
+    extraer_texto_cliente,
 )
 from fraseya.aplicacion.recomendaciones_ia import Sugerencia
 from fraseya.infraestructura import lector_chat
@@ -1067,3 +1071,228 @@ def test_asistente_vivo_genera_tres_opciones_aunque_catalogo_este_vacio():
         assert len({op.frase['contenido'] for op in res.opciones}) == 3
     finally:
         servicio.detener()
+
+
+def test_hilo_con_turnos_cliente_y_agente_evita_re_saludo():
+    rect_ventana = (0, 0, 1280, 720)
+    nodos = [
+        _NodoUIA('Hola, quiero consultar por automatizaciones', _UIA_CTRL_TEXT, (480, 220, 760, 244)),
+        _NodoUIA('Hola Yaimara, ¿en qué te podemos ayudar hoy en ConTech?', _UIA_CTRL_TEXT, (820, 280, 1230, 304)),
+        _NodoUIA('Leído', _UIA_CTRL_TEXT, (1180, 306, 1230, 320)),
+        _NodoUIA('Quiero cotizar la automatización de una página web', _UIA_CTRL_TEXT, (480, 350, 800, 374)),
+    ]
+    hilo = _extraer_lista_ultimos_mensajes(
+        nodos, rect_ventana, modo_area='ventana', limite=6, incluir_salientes=True
+    )
+    assert hilo == [
+        'Cliente: Hola, quiero consultar por automatizaciones',
+        'Agente: Hola Yaimara, ¿en qué te podemos ayudar hoy en ConTech?',
+        'Cliente: Quiero cotizar la automatización de una página web',
+    ]
+
+    # También funciona en el fallback TextPattern
+    texto_doc = '\n'.join([
+        'Hoy',
+        'Hola, quiero consultar por automatizaciones',
+        '10:01 p. m.',
+        'Tú: Hola Yaimara, ¿en qué te podemos ayudar hoy en ConTech?',
+        '10:03 p. m.',
+        'Leído',
+        'Quiero cotizar la automatización de una página web',
+        '10:04 p. m.',
+        'Escribe un mensaje',
+    ])
+    assert _extraer_mensajes_de_texto_plano(texto_doc, limite=6, incluir_salientes=True) == hilo
+
+    # Helpers de contexto distinguen primer contacto vs conversación en curso
+    texto_hilo = '\n'.join(hilo)
+    assert es_primer_contacto(texto_hilo) is False
+    assert es_primer_contacto('Cliente: Hola, quiero cotizar') is True
+    assert extraer_texto_cliente(texto_hilo) == 'Quiero cotizar la automatización de una página web'
+
+    # En conversación en curso, la variante empática NO antepone '¡Hola!'
+    empatica_seguimiento = _variar_por_tono(
+        '¿Qué proceso de tu página web necesitas automatizar?',
+        'empatica',
+        es_primer_contacto_chat=False,
+    )
+    assert not empatica_seguimiento.casefold().startswith(('hola', '¡hola'))
+    assert 'Con gusto te ayudamos.' in empatica_seguimiento
+
+    empatica_inicial = _variar_por_tono(
+        '¿Qué proceso de tu página web necesitas automatizar?',
+        'empatica',
+        es_primer_contacto_chat=True,
+    )
+    assert empatica_inicial.startswith('¡Hola! ')
+
+    # ServicioAsistenteVivo conserva turnos en memoria y usa contexto sin sesgo del agente
+    recomendador = Mock()
+    recomendador.sugerir.return_value = []
+    recomendador.generar.return_value = {
+        'titulo': 'Cotización automatización',
+        'categoria': 'General',
+        'contenido': '¿Qué proceso de tu página necesitas automatizar y qué herramientas usas hoy?',
+    }
+    resultados = []
+    servicio = ServicioAsistenteVivo(
+        recomendador=recomendador,
+        obtener_frases=lambda: [],
+        al_resultado=resultados.append,
+        al_error=lambda _: None,
+    )
+    try:
+        assert servicio.registrar_turno('Hola, quiero consultar por automatizaciones', rol='cliente', chat='Yaimara') is True
+        assert servicio.registrar_turno('Hola Yaimara, ¿en qué te podemos ayudar hoy en ConTech?', rol='agente', chat='Yaimara') is True
+        assert servicio.registrar_turno('Quiero cotizar la automatización de una página web', rol='cliente', chat='Yaimara') is True
+
+        mensajes = servicio.obtener_ultimos_mensajes(chat='Yaimara', limite=6)
+        assert mensajes == hilo
+
+        res = servicio.analizar_mensajes(mensajes, asincrono=False)
+        assert res is not None
+        assert len(res.opciones) == 3
+        for op in res.opciones:
+            assert not op.frase['contenido'].casefold().startswith(('hola', '¡hola'))
+        assert recomendador.generar.call_args.args[0] == texto_hilo
+    finally:
+        servicio.detener()
+
+
+def test_puente_acepta_rol_y_turnos_opcionales_y_extension_observa_salientes():
+    recibidos = []
+    evento = threading.Event()
+    puente = PuenteWhatsAppWeb(lambda t, m: (recibidos.append((t, m)), evento.set()), puerto=0)
+    puente.iniciar()
+    try:
+        payload = json.dumps({
+            'texto': 'Quiero cotizar la automatización',
+            'chat': 'Yaimara',
+            'remitente': 'Yaimara',
+            'rol': 'cliente',
+            'turnos': [
+                {'rol': 'cliente', 'texto': 'Hola'},
+                {'rol': 'agente', 'texto': 'Hola Yaimara, ¿en qué te ayudamos?'},
+                {'rol': 'cliente', 'texto': 'Quiero cotizar la automatización'},
+            ],
+        }).encode('utf-8')
+        st, _, _ = _peticion(
+            puente.puerto,
+            'POST',
+            '/mensaje',
+            cuerpo=payload,
+            cabeceras={'Origin': ORIGEN_WHATSAPP_WEB, 'Content-Type': 'application/json'},
+        )
+        assert st == 200
+        assert evento.wait(timeout=2.0)
+        _, meta = recibidos[-1]
+        assert meta['rol'] == 'cliente'
+        assert len(meta['turnos']) == 3
+    finally:
+        puente.detener()
+
+    js = (Path(__file__).resolve().parent.parent / 'extension_wsp' / 'content.js').read_text(encoding='utf-8')
+    assert 'div.message-out' in js
+    assert 'turnos' in js
+
+
+def test_consulta_compuesta_genera_tres_tarjetas_coherentes_y_completar_no_cambia_tema():
+    frases = _frases_catalogo() + [
+        {
+            'id': 99,
+            'titulo': 'Dominio y Hosting',
+            'abreviatura': '!dom',
+            'categoria': 'Web',
+            'origen': 'propia',
+            'favorita': False,
+            'contenido': 'El dominio cuesta $15.000 CLP/año y el hosting $65.000 CLP/año.',
+        }
+    ]
+    recomendador = Mock()
+    recomendador.sugerir.return_value = _sugerencias_tres(frases)[:1]
+    recomendador.generar.return_value = {
+        'titulo': 'Cotización integral web + hosting + chatbot',
+        'categoria': 'General',
+        'contenido': (
+            'El Sitio Web Corporativo cuesta $450.000 CLP (10-15 días, incluye dominio y hosting 1 año, '
+            'WebP y diseño responsive) y el Bot de WhatsApp + Agenda $380.000 CLP (7-10 días).'
+        ),
+    }
+
+    servicio = ServicioAsistenteVivo(
+        recomendador=recomendador,
+        obtener_frases=lambda: frases,
+        al_resultado=lambda _: None,
+        al_error=lambda _: None,
+    )
+    try:
+        # Consulta simple donde sugerir devuelve 1 item: la 3ª tarjeta deriva de la propuesta IA, no cambia de tema
+        res_simple = servicio.analizar_mensajes(['Mi pedido tiene demora'], asincrono=False)
+        assert res_simple is not None
+        assert len(res_simple.opciones) == 3
+        assert '15.000' not in res_simple.opciones[2].frase['contenido']
+        assert '450.000' in res_simple.opciones[2].frase['contenido']
+
+        # Consulta compuesta (web + hosting + chatbot): las 3 tarjetas salen unificadas desde generar()
+        recomendador.sugerir.reset_mock()
+        recomendador.generar.reset_mock()
+        hilo_compuesto = [
+            'Cliente: Quiero una página web con chatbot para veterinaria',
+            'Agente: Hola Yaimara, ¿qué detalles técnicos necesitas?',
+            'Cliente: 1. Dominio y hosting\n2. Velocidad WebP\n3. Diseño responsive y precio total',
+        ]
+        assert es_consulta_compuesta('\n'.join(hilo_compuesto)) is True
+        assert es_consulta_compuesta('¿Cuál es su horario?') is False
+
+        res_comp = servicio.analizar_mensajes(hilo_compuesto, asincrono=False)
+        assert res_comp is not None
+        recomendador.sugerir.assert_not_called()
+        recomendador.generar.assert_called_once()
+        assert len(res_comp.opciones) == 3
+        for op in res_comp.opciones:
+            assert '450.000' in op.frase['contenido']
+            assert '380.000' in op.frase['contenido']
+    finally:
+        servicio.detener()
+
+
+def test_mensaje_largo_multiparrafo_conserva_turno_agente_previo():
+    rect_ventana = (0, 0, 1280, 720)
+    nodos = [
+        _NodoUIA('Hola, quiero cotizar una página web para veterinaria', _UIA_CTRL_TEXT, (480, 140, 820, 164)),
+        _NodoUIA('Hola Yaimara, ¿podrías indicarnos los detalles?', _UIA_CTRL_TEXT, (860, 190, 1230, 214)),
+        _NodoUIA('Estoy cotizando el desarrollo web para mi clínica:', _UIA_CTRL_TEXT, (480, 250, 840, 274)),
+        _NodoUIA('1. Dominio y hosting propios', _UIA_CTRL_TEXT, (480, 290, 760, 314)),
+        _NodoUIA('2. Velocidad menor a 2,5 segundos y WebP', _UIA_CTRL_TEXT, (480, 330, 820, 354)),
+        _NodoUIA('3. Diseño responsive mobile-first', _UIA_CTRL_TEXT, (480, 370, 790, 394)),
+        _NodoUIA('4. Integración de chatbot para agenda', _UIA_CTRL_TEXT, (480, 410, 800, 434)),
+        _NodoUIA('Quedo atento a costos y plazos.', _UIA_CTRL_TEXT, (480, 450, 760, 474)),
+    ]
+    hilo = _extraer_lista_ultimos_mensajes(
+        nodos, rect_ventana, modo_area='ventana', limite=3, incluir_salientes=True
+    )
+    assert len(hilo) == 3
+    assert hilo[0] == 'Cliente: Hola, quiero cotizar una página web para veterinaria'
+    assert hilo[1] == 'Agente: Hola Yaimara, ¿podrías indicarnos los detalles?'
+    assert hilo[2].startswith('Cliente: Estoy cotizando el desarrollo web para mi clínica:\n1. Dominio y hosting propios')
+    assert 'Quedo atento a costos y plazos.' in hilo[2]
+    assert es_primer_contacto('\n'.join(hilo)) is False
+
+    # Empática NO antepone '¡Hola! ' porque el turno Agente quedó conservado
+    emp = _variar_por_tono('Gestionamos el dominio y hosting.', 'empatica', es_primer_contacto_chat=False)
+    assert not emp.startswith('¡Hola!')
+
+
+def test_enfocar_caja_mensaje_recurre_a_clic_seguro_si_uia_no_expone_edit(monkeypatch):
+    lector_uia = lector_chat._LectorUIA()
+    monkeypatch.setattr(lector_uia._ole32, 'CoInitializeEx', lambda *_: 0)
+    monkeypatch.setattr(lector_uia._ole32, 'CoUninitialize', lambda: None)
+    monkeypatch.setattr(lector_uia._ole32, 'CoCreateInstance', lambda *_: -2147467259)
+    llamadas = []
+    monkeypatch.setattr(
+        lector_chat,
+        '_clic_seguro_en_caja',
+        lambda hwnd, rc=None: (llamadas.append((hwnd, rc)), True)[1],
+    )
+    assert lector_uia.enfocar_caja_mensaje(12345) is True
+    assert llamadas == [(12345, None)]

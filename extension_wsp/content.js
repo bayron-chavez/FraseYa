@@ -1,5 +1,5 @@
-/* FraseYa · Lector WhatsApp Web (solo lectura de mensajes entrantes en memoria).
- * - Observa únicamente div.message-in dentro del chat activo (#main).
+/* FraseYa · Lector WhatsApp Web (solo lectura de contexto en memoria).
+ * - Observa burbujas div.message-in (cliente) y div.message-out (agente) dentro de #main.
  * - Extrae texto plano con innerText (nunca HTML ni campos de escritura).
  * - Agrupa ráfagas cortas (debounce 800 ms) y evita duplicados.
  * - Envía solo a http://127.0.0.1:47821/mensaje y falla en silencio si FraseYa está cerrado.
@@ -11,6 +11,8 @@
   const ENDPOINT = 'http://127.0.0.1:47821/mensaje';
   const DEBOUNCE_MS = 800;
   const MAX_LARGO = 4000;
+  const MAX_TURNOS_HISTORIAL = 6;
+  const MAX_LARGO_TURNO_HISTORIAL = 800;
   const MAX_CLAVES_VISTAS = 300;
 
   const nodosVistos = new WeakSet();
@@ -76,7 +78,7 @@
   }
 
   function extraerTextoPlano(nodoMensaje) {
-    // Selectores estables para el cuerpo textual del mensaje entrante.
+    // Selectores estables para el cuerpo textual de la burbuja.
     const bloques = nodoMensaje.querySelectorAll(
       '[data-testid="msg-container"] span.selectable-text, .copyable-text span.selectable-text, span.selectable-text'
     );
@@ -100,48 +102,44 @@
     return '';
   }
 
-  function claveDeMensaje(nodoMensaje, chat, texto) {
+  function rolDeNodo(el) {
+    if (!(el instanceof HTMLElement)) return null;
+    if (el.matches('div.message-out')) return 'agente';
+    if (el.matches('div.message-in') && !el.closest('div.message-out')) return 'cliente';
+    return null;
+  }
+
+  function claveDeMensaje(nodoMensaje, chat, texto, rol) {
     const contenedorId = nodoMensaje.closest('[data-id]') || nodoMensaje.querySelector('[data-id]');
     const dataId = contenedorId ? contenedorId.getAttribute('data-id') : '';
     if (dataId) return `id:${dataId}`;
-    return `txt:${chat.toLowerCase()}::${texto.toLowerCase()}`;
+    return `txt:${rol}:${chat.toLowerCase()}::${texto.toLowerCase()}`;
   }
 
-  function esNodoEntrante(el) {
-    if (!(el instanceof HTMLElement)) return false;
-    if (el.classList.contains('message-out') || el.closest('div.message-out')) return false;
-    return el.matches('div.message-in');
-  }
-
-  function buscarEntrantesEn(raiz) {
+  function buscarMensajesEn(raiz) {
     const encontrados = [];
     if (!(raiz instanceof HTMLElement)) return encontrados;
-    if (esNodoEntrante(raiz)) {
-      encontrados.push(raiz);
+    const rolRaiz = rolDeNodo(raiz);
+    if (rolRaiz) {
+      encontrados.push({ nodo: raiz, rol: rolRaiz });
+      return encontrados;
     }
-    const hijos = raiz.querySelectorAll('div.message-in');
+    const hijos = raiz.querySelectorAll('div.message-in, div.message-out');
     for (const hijo of hijos) {
-      if (esNodoEntrante(hijo)) {
-        encontrados.push(hijo);
+      const rol = rolDeNodo(hijo);
+      if (rol) {
+        encontrados.push({ nodo: hijo, rol });
       }
     }
     return encontrados;
   }
 
-  function enviarCola() {
-    temporizador = null;
-    if (colaMensajes.length === 0) return;
-
-    const texto = colaMensajes.join('\n').slice(-MAX_LARGO).trim();
-    const { chat, remitente } = ultimoMeta;
-    colaMensajes = [];
-    if (!texto) return;
-
+  function enviarPayload(payload) {
     try {
       fetch(ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ texto, chat, remitente }),
+        body: JSON.stringify(payload),
       }).catch(() => {
         // Silencio total si FraseYa no está abierto o el puente está pausado.
       });
@@ -150,7 +148,46 @@
     }
   }
 
-  function encolarMensaje(nodoMensaje) {
+  function compactarTurnos(lista) {
+    const turnos = [];
+    for (const item of lista) {
+      if (!item || !item.texto) continue;
+      const rol = item.rol === 'agente' ? 'agente' : 'cliente';
+      const txt = item.texto.slice(0, MAX_LARGO_TURNO_HISTORIAL).trim();
+      if (!txt) continue;
+      const ultimo = turnos[turnos.length - 1];
+      if (ultimo && ultimo.rol === rol) {
+        if (!ultimo.texto.includes(txt)) {
+          ultimo.texto = `${ultimo.texto}\n${txt}`.slice(-MAX_LARGO_TURNO_HISTORIAL).trim();
+        }
+      } else {
+        turnos.push({ rol, texto: txt });
+      }
+    }
+    return turnos.slice(-MAX_TURNOS_HISTORIAL);
+  }
+
+  function enviarCola() {
+    temporizador = null;
+    if (colaMensajes.length === 0) return;
+
+    const turnos = compactarTurnos(colaMensajes);
+    const { chat, remitente } = ultimoMeta;
+    colaMensajes = [];
+    if (turnos.length === 0) return;
+
+    const ultimo = turnos[turnos.length - 1];
+    const texto = ultimo.texto.slice(-MAX_LARGO).trim();
+    if (!texto) return;
+
+    const payload = { texto, chat, remitente, rol: ultimo.rol };
+    if (turnos.length > 1) {
+      payload.turnos = turnos;
+    }
+    enviarPayload(payload);
+  }
+
+  function encolarMensaje(nodoMensaje, rol) {
     if (nodosVistos.has(nodoMensaje)) return;
     nodosVistos.add(nodoMensaje);
 
@@ -158,12 +195,13 @@
     if (!texto) return;
 
     const chat = obtenerNombreChat();
-    const clave = claveDeMensaje(nodoMensaje, chat, texto);
+    const clave = claveDeMensaje(nodoMensaje, chat, texto, rol);
     if (!registrarClave(clave)) return;
 
-    const remitente = extraerRemitente(nodoMensaje, chat);
-    if (!colaMensajes.includes(texto)) {
-      colaMensajes.push(texto);
+    const remitente = rol === 'cliente' ? extraerRemitente(nodoMensaje, chat) : chat;
+    const ultimo = colaMensajes[colaMensajes.length - 1];
+    if (!ultimo || ultimo.rol !== rol || ultimo.texto !== texto) {
+      colaMensajes.push({ rol, texto });
     }
     ultimoMeta = { chat, remitente };
 
@@ -177,23 +215,37 @@
     const burbujas = panel.querySelectorAll('div.message-in, div.message-out');
     if (burbujas.length === 0) return;
 
-    const ultima = burbujas[burbujas.length - 1];
     const chat = obtenerNombreChat();
+    const historialValido = [];
+    let ultimoRemitenteCliente = chat;
 
     for (let i = 0; i < burbujas.length; i += 1) {
       const burbuja = burbujas[i];
-      if (!esNodoEntrante(burbuja)) continue;
-      if (burbuja === ultima) {
-        // Si al abrir el chat el último mensaje es del cliente, lo sugerimos una sola vez.
-        encolarMensaje(burbuja);
-      } else {
-        nodosVistos.add(burbuja);
-        const txt = extraerTextoPlano(burbuja);
-        if (txt) {
-          registrarClave(claveDeMensaje(burbuja, chat, txt));
-        }
+      const rol = rolDeNodo(burbuja);
+      if (!rol) continue;
+      nodosVistos.add(burbuja);
+      const txt = extraerTextoPlano(burbuja);
+      if (!txt) continue;
+      registrarClave(claveDeMensaje(burbuja, chat, txt, rol));
+      historialValido.push({ rol, texto: txt });
+      if (rol === 'cliente') {
+        ultimoRemitenteCliente = extraerRemitente(burbuja, chat);
       }
     }
+
+    const recientes = compactarTurnos(historialValido.slice(-MAX_TURNOS_HISTORIAL));
+    if (recientes.length === 0) return;
+    const tieneCliente = recientes.some((t) => t.rol === 'cliente');
+    if (!tieneCliente) return;
+
+    const ultimo = recientes[recientes.length - 1];
+    enviarPayload({
+      texto: ultimo.texto.slice(-MAX_LARGO),
+      chat,
+      remitente: ultimoRemitenteCliente,
+      rol: ultimo.rol,
+      turnos: recientes,
+    });
   }
 
   function esRecienteAlFinal(panel, nodoMensaje) {
@@ -209,6 +261,11 @@
 
   function conectarPanel(panel) {
     if (panel === panelActual) return;
+    if (temporizador !== null) {
+      clearTimeout(temporizador);
+      temporizador = null;
+    }
+    colaMensajes = [];
     if (observadorPanel) {
       observadorPanel.disconnect();
       observadorPanel = null;
@@ -221,10 +278,10 @@
     observadorPanel = new MutationObserver((mutaciones) => {
       for (const mutacion of mutaciones) {
         for (const nodo of mutacion.addedNodes) {
-          const entrantes = buscarEntrantesEn(nodo);
-          for (const mensaje of entrantes) {
+          const mensajes = buscarMensajesEn(nodo);
+          for (const { nodo: mensaje, rol } of mensajes) {
             if (esRecienteAlFinal(panel, mensaje)) {
-              encolarMensaje(mensaje);
+              encolarMensaje(mensaje, rol);
             } else {
               nodosVistos.add(mensaje);
             }

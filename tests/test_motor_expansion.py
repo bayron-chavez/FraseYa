@@ -251,3 +251,29 @@ def test_insertar_descarta_lo_que_se_venia_escribiendo():
     escribir(m, 'hol')
     m.insertar('texto', 1)
     assert m.escrito == ''
+
+
+def test_insertar_aborta_sin_escribir_si_antes_de_escribir_devuelve_false():
+    m, escritor, _ = motor()
+    eventos = []
+    assert m.insertar(
+        'Hola',
+        100,
+        antes_de_escribir=lambda: False,
+        al_terminar=lambda ok, err: eventos.append((ok, err)),
+    ) is True
+    assert escritor.llamadas == []
+    assert eventos == [(False, 'sin_foco')]
+
+
+def test_insertar_reporta_error_si_escritor_falla():
+    m, escritor, _ = motor()
+    escritor.reemplazar = lambda *_: (_ for _ in ()).throw(OSError('SendInput falló (error 5).'))
+    eventos = []
+    assert m.insertar(
+        'Hola',
+        100,
+        al_terminar=lambda ok, err: eventos.append((ok, err)),
+    ) is True
+    assert eventos and eventos[0][0] is False
+    assert 'SendInput' in eventos[0][1]

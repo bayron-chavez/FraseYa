@@ -142,7 +142,19 @@ def abrir(ruta, con_teclado=True, configurar=False):
                     nonlocal ultimo_mensaje_ext_ts
                     ultimo_mensaje_ext_ts = time.monotonic()
                     # Solo almacena en el búfer en memoria (sin llamar a Gemini en automático)
-                    if servicio_vivo.registrar_mensaje_entrante(texto, chat=meta.get('chat', '')):
+                    chat_meta = meta.get('chat', '') if isinstance(meta, dict) else ''
+                    rol_meta = meta.get('rol') if isinstance(meta, dict) else None
+                    turnos_meta = meta.get('turnos') if isinstance(meta, dict) else None
+                    if rol_meta or turnos_meta:
+                        registrado = servicio_vivo.registrar_turno(
+                            texto,
+                            rol=rol_meta or 'cliente',
+                            chat=chat_meta,
+                            turnos=turnos_meta,
+                        )
+                    else:
+                        registrado = servicio_vivo.registrar_mensaje_entrante(texto, chat=chat_meta)
+                    if registrado and (rol_meta or 'cliente') == 'cliente':
                         eventos_vivo.put((
                             'aviso_suave',
                             'Mensaje nuevo en WhatsApp Web · Pulsa «Leer últimos 3»',
@@ -158,11 +170,20 @@ def abrir(ruta, con_teclado=True, configurar=False):
                     puente_disponible = False
 
                 def _usar_flotante(_frase, texto):
+                    nonlocal ultimo_hwnd_wsp, ultimo_rect_wsp, ultima_ventana_wsp
                     if not texto:
                         return
+                    if not ultimo_hwnd_wsp and lector_chat is not None:
+                        win_act = lector_chat.ventana_whatsapp_activa()
+                        if win_act is not None:
+                            ultimo_hwnd_wsp = win_act.hwnd
+                            ultimo_rect_wsp = win_act.rect
+                            ultima_ventana_wsp = win_act
                     if expansion is not None and ultimo_hwnd_wsp:
                         hwnd_obj = ultimo_hwnd_wsp
                         controlador_flotante.ocultar_sugerencias()
+                        if hasattr(expansion, 'desarmar_pegado_al_clic'):
+                            expansion.desarmar_pegado_al_clic()
                         try:
                             QApplication.clipboard().setText(texto)
                         except Exception:
@@ -172,17 +193,58 @@ def abrir(ruta, con_teclado=True, configurar=False):
                             activar_ventana(hwnd_obj)
                         except Exception:
                             pass
-                        ok = expansion.insertar_texto_en_ventana(
-                            texto,
-                            hwnd_obj,
-                            enfocar_destino=lambda h=hwnd_obj: lector_chat.enfocar_caja_mensaje(h),
-                        )
+
+                        def _al_terminar_insercion(ok_ins, err_ins):
+                            if detenido:
+                                return
+                            if ok_ins:
+                                eventos_vivo.put((
+                                    'estado_insercion',
+                                    'Frase copiada y pegada en WhatsApp. Revísala y envía.',
+                                ))
+                            elif err_ins == 'sin_foco' and hasattr(expansion, 'armar_pegado_al_clic'):
+                                expansion.armar_pegado_al_clic(
+                                    texto,
+                                    hwnd_obj,
+                                    al_pegar=lambda ok_c, _e: (
+                                        eventos_vivo.put((
+                                            'estado_insercion',
+                                            'Frase copiada y pegada en WhatsApp. Revísala y envía.'
+                                            if ok_c else
+                                            'Copiada al portapapeles. Pégala en el chat con Ctrl+V.',
+                                        ))
+                                        if not detenido else None
+                                    ),
+                                )
+                                eventos_vivo.put((
+                                    'estado_insercion',
+                                    'Copiada al portapapeles · Haz clic en la caja del chat de WhatsApp para pegarla.',
+                                ))
+                            else:
+                                eventos_vivo.put((
+                                    'estado_insercion',
+                                    'Copiada al portapapeles (pegado automático bloqueado). Pégala con Ctrl+V.',
+                                ))
+
+                        try:
+                            ok = expansion.insertar_texto_en_ventana(
+                                texto,
+                                hwnd_obj,
+                                enfocar_destino=lambda h=hwnd_obj: lector_chat.enfocar_caja_mensaje(h),
+                                al_terminar=_al_terminar_insercion,
+                            )
+                        except TypeError:
+                            ok = expansion.insertar_texto_en_ventana(
+                                texto,
+                                hwnd_obj,
+                                enfocar_destino=lambda h=hwnd_obj: lector_chat.enfocar_caja_mensaje(h),
+                            )
                         if ok:
                             controlador_flotante.mostrar_aviso(
-                                'Frase copiada y pegada en WhatsApp. Revísala y envía.'
+                                'Insertando frase en WhatsApp…'
                             )
                             ventana.estado.setText(
-                                'Frase copiada y pegada en WhatsApp. Revísala y envía.'
+                                'Insertando frase en WhatsApp…'
                             )
                         else:
                             controlador_flotante.mostrar_aviso(
@@ -291,18 +353,27 @@ def abrir(ruta, con_teclado=True, configurar=False):
                                 ultimo_mensaje_ext_ts > 0.0
                                 and (time.monotonic() - ultimo_mensaje_ext_ts) <= _VENTANA_EXT_ACTIVA_SEG
                             )
+
+                            def _leer_hilo_desktop(win_actual):
+                                try:
+                                    return lector_chat.leer_ultimos_mensajes(
+                                        win_actual, limite=8, incluir_salientes=True
+                                    )
+                                except TypeError:
+                                    return lector_chat.leer_ultimos_mensajes(win_actual, limite=3)
+
                             mensajes: list[str] = []
                             if win is not None:
                                 if win.tipo == 'web' and extension_reciente:
-                                    mensajes = servicio_vivo.obtener_ultimos_mensajes(limite=3)
+                                    mensajes = servicio_vivo.obtener_ultimos_mensajes(limite=8)
                                     if not mensajes:
-                                        mensajes = lector_chat.leer_ultimos_mensajes(win, limite=3)
+                                        mensajes = _leer_hilo_desktop(win)
                                 else:
-                                    mensajes = lector_chat.leer_ultimos_mensajes(win, limite=3)
+                                    mensajes = _leer_hilo_desktop(win)
                                     if not mensajes and win.tipo == 'web':
-                                        mensajes = servicio_vivo.obtener_ultimos_mensajes(limite=3)
+                                        mensajes = servicio_vivo.obtener_ultimos_mensajes(limite=8)
                             else:
-                                mensajes = servicio_vivo.obtener_ultimos_mensajes(limite=3)
+                                mensajes = servicio_vivo.obtener_ultimos_mensajes(limite=8)
 
                             if detenido:
                                 return
@@ -381,8 +452,8 @@ def abrir(ruta, con_teclado=True, configurar=False):
                             controlador_flotante.reposicionar(win.rect)
                     else:
                         if not controlador_flotante.esta_en_foco_propio() and not modo_demo_vivo:
-                            if controlador_flotante.barra.isVisible() or controlador_flotante.tarjetas:
-                                controlador_flotante.ocultar_todo()
+                            if controlador_flotante.esta_visible():
+                                controlador_flotante.ocultar_temporalmente()
 
                 timer_vivo.timeout.connect(_monitorear_whatsapp)
                 timer_vivo.start(800)
@@ -453,6 +524,9 @@ def abrir(ruta, con_teclado=True, configurar=False):
                         elif tipo == 'aviso_suave':
                             if controlador_flotante.barra.isVisible() and not lectura_en_curso.is_set():
                                 controlador_flotante.mostrar_aviso(str(dato))
+                        elif tipo == 'estado_insercion':
+                            controlador_flotante.mostrar_aviso(str(dato))
+                            ventana.estado.setText(str(dato))
                         elif tipo == 'fin_carga':
                             controlador_flotante.establecer_cargando(False)
                         elif tipo == 'error':

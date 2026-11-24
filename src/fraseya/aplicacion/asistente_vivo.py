@@ -193,9 +193,79 @@ def _envolver_sugerencias(sugerencias) -> tuple[OpcionFlotante, ...]:
 _PREFIJOS_SALUDO = (
     'hola', '¡hola', 'buenos', 'buenas', 'estimad', 'gracias', 'lament', 'disculp', 'entendemos',
 )
+_RE_TURNO_AGENTE = re.compile(r'(?im)^agente\s*:\s*\S')
+_RE_LINEA_TURNO = re.compile(r'^(cliente|agente)\s*:\s*(.*)$', re.IGNORECASE)
+_RE_ITEM_LISTA = re.compile(r'(?m)^\s*(?:\d+[.)]|[-•*])\s+\S')
+_GRUPOS_CONSULTA_COMPUESTA: tuple[tuple[str, ...], ...] = (
+    ('pagina web', 'sitio web', 'landing', 'tienda online', 'ecommerce', 'e-commerce', 'web corporativa'),
+    ('hosting', 'dominio', 'velocidad', 'webp', 'responsive', 'mobile-first', 'mantenimiento'),
+    ('automatizacion', 'automatizar', 'chatbot', 'chat bot', 'bot', 'agenda automatica', 'n8n', 'make'),
+    ('software a medida', 'sistema', 'crm', 'erp', 'saas', 'aplicacion'),
+)
 
 
-def _variar_por_tono(contenido: str, tono: str, animo: str = 'Neutral') -> str:
+def es_consulta_compuesta(texto: str) -> bool:
+    """True cuando el cliente consulta varios puntos técnicos o servicios a la vez."""
+    if not isinstance(texto, str) or not texto.strip():
+        return False
+    solo_cliente = extraer_texto_cliente(texto)
+    if len(_RE_ITEM_LISTA.findall(solo_cliente)) >= 2:
+        return True
+    norm = normalizar(texto)
+    grupos_activos = sum(
+        1 for grupo in _GRUPOS_CONSULTA_COMPUESTA
+        if any(termino in norm for termino in grupo)
+    )
+    return grupos_activos >= 2
+
+
+def es_primer_contacto(texto: str) -> bool:
+    """True si no se detectan respuestas previas del agente en la conversación."""
+    if not isinstance(texto, str) or not texto.strip():
+        return True
+    return _RE_TURNO_AGENTE.search(texto) is None
+
+
+def extraer_texto_cliente(texto: str) -> str:
+    """Extrae los mensajes del cliente para clasificar tema/ánimo sin sesgo del agente."""
+    if not isinstance(texto, str) or not texto.strip():
+        return ''
+    lineas = texto.splitlines()
+    tiene_etiquetas = any(_RE_LINEA_TURNO.match(l.strip()) for l in lineas if l.strip())
+    if not tiene_etiquetas:
+        return texto.strip()
+
+    despues_ultimo_agente: list[str] = []
+    todos_cliente: list[str] = []
+    rol_actual = 'cliente'
+    for linea in lineas:
+        limpia = linea.strip()
+        if not limpia:
+            continue
+        m = _RE_LINEA_TURNO.match(limpia)
+        if m:
+            rol_actual = m.group(1).casefold()
+            cuerpo = m.group(2).strip()
+        else:
+            cuerpo = limpia
+        if not cuerpo:
+            continue
+        if rol_actual == 'agente':
+            despues_ultimo_agente.clear()
+        else:
+            todos_cliente.append(cuerpo)
+            despues_ultimo_agente.append(cuerpo)
+
+    elegidos = despues_ultimo_agente or todos_cliente
+    return '\n'.join(elegidos).strip() or texto.strip()
+
+
+def _variar_por_tono(
+    contenido: str,
+    tono: str,
+    animo: str = 'Neutral',
+    es_primer_contacto_chat: bool = True,
+) -> str:
     """Genera una variante breve y natural en español según tono, sin llamadas extra."""
     base = (contenido or '').strip()
     if not base:
@@ -204,11 +274,16 @@ def _variar_por_tono(contenido: str, tono: str, animo: str = 'Neutral') -> str:
     tiene_saludo = any(bajo.startswith(pref) for pref in _PREFIJOS_SALUDO)
     if tono == 'empatica':
         if animo == 'Molesto':
-            texto = f'Entendemos tu molestia. {base}'
-        elif not tiene_saludo:
+            if bajo.startswith(('entend', 'lament', 'disculp')):
+                texto = f'{base} Con gusto te ayudamos.' if 'con gusto' not in bajo else base
+            else:
+                texto = f'Entendemos tu molestia. {base}'
+        elif es_primer_contacto_chat and not tiene_saludo:
             texto = f'¡Hola! {base}'
-        else:
+        elif 'con gusto' not in bajo:
             texto = f'{base} Con gusto te ayudamos.'
+        else:
+            texto = f'{base} Quedamos atentos para ayudarte.'
         return texto[:MAX_LARGO_MENSAJE]
     if tono == 'directa':
         return base[:MAX_LARGO_MENSAJE]
@@ -220,7 +295,11 @@ def _variar_por_tono(contenido: str, tono: str, animo: str = 'Neutral') -> str:
     return texto[:MAX_LARGO_MENSAJE]
 
 
-def _construir_tres_borradores_ia(generada: dict, animo: str = 'Neutral') -> tuple[OpcionFlotante, ...]:
+def _construir_tres_borradores_ia(
+    generada: dict,
+    animo: str = 'Neutral',
+    es_primer_contacto_chat: bool = True,
+) -> tuple[OpcionFlotante, ...]:
     """A partir de un único borrador IA, construye 3 opciones flotantes diferenciadas por tono."""
     titulo = str(generada.get('titulo') or 'Propuesta IA').strip()[:200]
     categoria = str(generada.get('categoria') or 'General').strip()[:200]
@@ -232,7 +311,12 @@ def _construir_tres_borradores_ia(generada: dict, animo: str = 'Neutral') -> tup
     )
     opciones: list[OpcionFlotante] = []
     for idx, (tono, nombre_tono) in enumerate(TONOS_OPCION, start=1):
-        variante = _variar_por_tono(base, tono, animo=animo)
+        variante = _variar_por_tono(
+            base,
+            tono,
+            animo=animo,
+            es_primer_contacto_chat=es_primer_contacto_chat,
+        )
         frase_borrador = {
             'id': -idx,
             'titulo': titulo,
@@ -399,6 +483,58 @@ class ServicioAsistenteVivo:
         for t in timers:
             t.cancel()
 
+    def registrar_turno(
+        self,
+        texto: str,
+        rol: str = 'cliente',
+        chat: str = '',
+        turnos: list[dict] | None = None,
+    ) -> bool:
+        """Guarda turnos recientes ('Cliente:' / 'Agente:') en el búfer efímero en memoria."""
+        rol_norm = 'agente' if str(rol or '').strip().casefold() == 'agente' else 'cliente'
+        limpio = _limpiar_texto(texto)
+        if not turnos and (not limpio or len(limpio) > MAX_LARGO_MENSAJE):
+            return False
+
+        entradas: list[str] = []
+        if isinstance(turnos, list) and turnos:
+            for item in turnos[-8:]:
+                if not isinstance(item, dict):
+                    continue
+                t_txt = _limpiar_texto(str(item.get('texto') or ''))
+                if not t_txt or len(t_txt) > MAX_LARGO_MENSAJE:
+                    continue
+                t_rol = 'Agente' if str(item.get('rol') or '').strip().casefold() == 'agente' else 'Cliente'
+                etiquetado = f'{t_rol}: {t_txt}'[:MAX_LARGO_MENSAJE]
+                if not entradas or _huella(entradas[-1]) != _huella(etiquetado):
+                    entradas.append(etiquetado)
+        if not entradas:
+            if not limpio or len(limpio) > MAX_LARGO_MENSAJE:
+                return False
+            pref = 'Agente' if rol_norm == 'agente' else 'Cliente'
+            entradas = [f'{pref}: {limpio}'[:MAX_LARGO_MENSAJE]]
+
+        clave_chat = (chat or '').strip().casefold()
+        with self._candado:
+            if self._detenido:
+                return False
+            cola = self._buffer_mensajes.get(clave_chat)
+            if cola is None:
+                if len(self._buffer_mensajes) >= _MAX_CHATS_MEMORIA:
+                    mas_antiguo = next(iter(self._buffer_mensajes))
+                    self._buffer_mensajes.pop(mas_antiguo, None)
+                cola = deque(maxlen=8)
+                self._buffer_mensajes[clave_chat] = cola
+            if len(entradas) > 1:
+                cola.clear()
+                cola.extend(entradas)
+            else:
+                etiquetado = entradas[0]
+                if not cola or _huella(cola[-1]) != _huella(etiquetado):
+                    cola.append(etiquetado)
+            self._ultimo_chat_buffer = clave_chat
+        return True
+
     def registrar_mensaje_entrante(self, texto: str, chat: str = '') -> bool:
         """Guarda un mensaje entrante en el búfer efímero en memoria (sin llamar a la IA)."""
         limpio = _limpiar_texto(texto)
@@ -413,7 +549,7 @@ class ServicioAsistenteVivo:
                 if len(self._buffer_mensajes) >= _MAX_CHATS_MEMORIA:
                     mas_antiguo = next(iter(self._buffer_mensajes))
                     self._buffer_mensajes.pop(mas_antiguo, None)
-                cola = deque(maxlen=6)
+                cola = deque(maxlen=8)
                 self._buffer_mensajes[clave_chat] = cola
             if not cola or _huella(cola[-1]) != _huella(limpio):
                 cola.append(limpio)
@@ -554,7 +690,7 @@ class ServicioAsistenteVivo:
             return None
 
         limpios = [_limpiar_texto(m) for m in crudos if isinstance(m, str) and _limpiar_texto(m)]
-        ultimos = limpios[-3:]
+        ultimos = limpios[-8:]
         if not ultimos:
             self._notificar_error('No se detectaron mensajes visibles en el chat.')
             return None
@@ -630,6 +766,9 @@ class ServicioAsistenteVivo:
         texto: str,
         frases: list[dict],
         animo: str,
+        *,
+        texto_busqueda: str | None = None,
+        es_primer_contacto_chat: bool = True,
     ) -> tuple[OpcionFlotante, ...]:
         """Completa 1 o 2 opciones hasta 3 usando a lo sumo 1 llamada a generar y/o catálogo."""
         lista = list(opciones_base)[:MAX_OPCIONES_VIVO]
@@ -661,10 +800,38 @@ class ServicioAsistenteVivo:
                     motivo='Borrador generado por IA para complementar tus opciones. Revísalo antes de usar.',
                 ))
                 usados_txt.add(_huella(contenido_gen))
+                # Si aún falta la 3ª tarjeta, crea una variante de tono de la propia propuesta IA
+                # para no mezclar otro tema distinto desde el catálogo.
+                while len(lista) < MAX_OPCIONES_VIVO:
+                    idx_var = len(lista) + 1
+                    tono_var, nombre_var = TONOS_OPCION[idx_var - 1]
+                    variante_gen = (
+                        _variar_por_tono(
+                            contenido_gen,
+                            tono_var,
+                            animo=animo,
+                            es_primer_contacto_chat=es_primer_contacto_chat,
+                        )
+                        or contenido_gen
+                    )
+                    if _huella(variante_gen) in usados_txt:
+                        break
+                    lista.append(OpcionFlotante(
+                        indice=idx_var,
+                        etiqueta=f'Propuesta IA · Revisar ({nombre_var})',
+                        tono=tono_var,
+                        frase={
+                            **frase_borrador,
+                            'id': -idx_var,
+                            'contenido': variante_gen,
+                        },
+                        motivo=f'Variante en tono {nombre_var.lower()} sobre el mismo contexto. Revísalo antes de usar.',
+                    ))
+                    usados_txt.add(_huella(variante_gen))
 
-        # 2. Frases más relevantes del catálogo que aún no estén incluidas
+        # 2. Frases más relevantes del catálogo solo si la IA no generó borrador suficiente
         if len(lista) < MAX_OPCIONES_VIVO:
-            for cand in _rankear_frases_relevantes(texto, frases):
+            for cand in _rankear_frases_relevantes(texto_busqueda or texto, frases):
                 if len(lista) >= MAX_OPCIONES_VIVO:
                     break
                 cid = cand.get('id')
@@ -693,7 +860,15 @@ class ServicioAsistenteVivo:
             while len(lista) < MAX_OPCIONES_VIVO:
                 idx = len(lista) + 1
                 tono, nombre_tono = TONOS_OPCION[idx - 1]
-                variante = _variar_por_tono(base_contenido, tono, animo=animo) or base_contenido
+                variante = (
+                    _variar_por_tono(
+                        base_contenido,
+                        tono,
+                        animo=animo,
+                        es_primer_contacto_chat=es_primer_contacto_chat,
+                    )
+                    or base_contenido
+                )
                 frase_var = {
                     **base_frase,
                     'id': -idx,
@@ -715,16 +890,29 @@ class ServicioAsistenteVivo:
             frases = list(self._obtener_frases() or [])
             if not self._puede_emitir(epoca, exigir_activo):
                 return None
-            tema, animo, urgencia = clasificar_contexto(texto)
-            self._notificar_analizando(texto)
+            primer_contacto = es_primer_contacto(texto)
+            texto_cliente = extraer_texto_cliente(texto)
+            tema, animo, urgencia = clasificar_contexto(texto_cliente)
+            self._notificar_analizando(texto_cliente)
 
-            sugerencias = self._recomendador.sugerir(texto, frases) if frases else []
+            compuesta = es_consulta_compuesta(texto)
+            sugerencias = (
+                self._recomendador.sugerir(texto, frases)
+                if (frases and not compuesta) else []
+            )
             if not self._puede_emitir(epoca, exigir_activo):
                 return None
 
             if sugerencias:
                 opciones_base = _envolver_sugerencias(sugerencias)
-                opciones = self._completar_hasta_tres(opciones_base, texto, frases, animo)
+                opciones = self._completar_hasta_tres(
+                    opciones_base,
+                    texto,
+                    frases,
+                    animo,
+                    texto_busqueda=texto_cliente,
+                    es_primer_contacto_chat=primer_contacto,
+                )
                 if not self._puede_emitir(epoca, exigir_activo):
                     return None
             else:
@@ -741,7 +929,11 @@ class ServicioAsistenteVivo:
                             'Sin coincidencias en el catálogo de frases aprobadas para este mensaje.'
                         )
                     return None
-                opciones = _construir_tres_borradores_ia(generada, animo=animo)
+                opciones = _construir_tres_borradores_ia(
+                    generada,
+                    animo=animo,
+                    es_primer_contacto_chat=primer_contacto,
+                )
 
             resultado = ResultadoVivo(
                 tema=tema,

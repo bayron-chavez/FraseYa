@@ -73,3 +73,21 @@ test('Esquemas rechazan duplicados, tamaños y texto alternativo',()=>{
   assert.throws(()=>validarPedido({...pedido,mensaje:'x'.repeat(4001)}));
   assert.throws(()=>validarSalida({sugerencias:[{id:1,motivo:'Bien',contenido:'Inventado'}]},new Set([1])));
 });
+test('Prompts prohíben repetir saludo cuando ya existe turno de Agente',async()=>{
+  const salida={titulo:'Seguimiento',categoria:'Ventas',contenido:'¿Qué proceso necesitas automatizar?'};
+  const hilo='Cliente: Hola\nAgente: Hola Yaimara, ¿en qué te ayudamos?\nCliente: Quiero cotizar una web';
+  const gen=transporte({salida});
+  const rGen=await crearHandler(env,gen.f)(request({...pedido,mensaje:hilo,modo:'generar'}));
+  assert.equal(rGen.status,200);
+  const bodyGen=JSON.parse(gen.llamadas.at(-1).init.body);
+  assert.match(bodyGen.systemInstruction.parts[0].text,/NO vuelvas a saludar/);
+  assert.equal(JSON.parse(bodyGen.contents[0].parts[0].text).mensaje,hilo);
+
+  const sug=transporte();
+  const rSug=await crearHandler(env,sug.f)(request({...pedido,mensaje:hilo}));
+  assert.equal(rSug.status,200);
+  const bodySug=JSON.parse(sug.llamadas.at(-1).init.body);
+  assert.match(bodySug.systemInstruction.parts[0].text,/NO exijas \{nombre\}/);
+  assert.match(bodySug.systemInstruction.parts[0].text,/cubre TODOS esos puntos juntos/);
+  assert.match(bodyGen.systemInstruction.parts[0].text,/respuesta unificada/);
+});

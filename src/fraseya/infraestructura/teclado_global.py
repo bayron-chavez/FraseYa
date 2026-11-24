@@ -11,6 +11,8 @@ motor no se dispare con su propio texto.
 """
 import ctypes
 import sys
+import threading
+import time
 from ctypes import wintypes
 
 TECLAS_CONFIRMACION = {'tab': 0x09, 'enter': 0x0D, 'espacio': 0x20}
@@ -129,6 +131,37 @@ class TecladoGlobal:
         self._teclado = None
         self._raton = None
         self._u = None
+        self._candado_clic = threading.Lock()
+        self._pegado_pendiente = None
+
+    def armar_pegado_al_clic(self, callback, timeout_seg: float = 10.0):
+        """Arma una única ejecución de `callback()` tras el próximo clic de ratón."""
+        if not callable(callback):
+            return
+        expira = time.monotonic() + max(1.0, float(timeout_seg))
+        with self._candado_clic:
+            self._pegado_pendiente = (callback, expira)
+
+    def desarmar_pegado_al_clic(self):
+        with self._candado_clic:
+            self._pegado_pendiente = None
+
+    def _al_clic_raton(self, x, y, button, pressed):
+        self.motor.reiniciar()
+        if pressed:
+            return
+        nombre_btn = getattr(button, 'name', str(button)).lower()
+        if 'left' not in nombre_btn:
+            return
+        pendiente = None
+        with self._candado_clic:
+            if self._pegado_pendiente is not None:
+                cb, expira = self._pegado_pendiente
+                self._pegado_pendiente = None
+                if time.monotonic() <= expira:
+                    pendiente = cb
+        if pendiente is not None:
+            threading.Thread(target=pendiente, daemon=True, name='fraseya-pegar-clic').start()
 
     def configurar(self, tecla_confirmacion=None, atajo=None):
         """Cambia la tecla de confirmación y/o el atajo sin reiniciar.
@@ -149,11 +182,12 @@ class TecladoGlobal:
         from pynput import keyboard, mouse   # import tardío: solo hace falta al capturar
         self._u = _user32()
         self._teclado = keyboard.Listener(win32_event_filter=self._filtro)
-        self._raton = mouse.Listener(on_click=lambda *_: self.motor.reiniciar())
+        self._raton = mouse.Listener(on_click=self._al_clic_raton)
         self._teclado.start()
         self._raton.start()
 
     def detener(self):
+        self.desarmar_pegado_al_clic()
         for oyente in (self._teclado, self._raton):
             if oyente is not None:
                 oyente.stop()

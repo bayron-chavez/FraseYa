@@ -159,10 +159,12 @@ _PREFIJOS_UI_IGNORAR = (
     'buscar o empezar', 'search or start',
 )
 _PREFIJOS_SALIENTES = ('tú:', 'tu:', 'you:', 'enviado:', 'mensaje enviado')
+_RE_PREFIJO_SALIENTE = re.compile(r'^(?:t[uú]|you|enviado|mensaje enviado)\s*:\s*', re.IGNORECASE)
 _ESTADOS_SALIENTES_SOLOS = frozenset({'leído', 'leido', 'entregado', 'enviado', 'read', 'delivered', 'sent', 'doble check'})
 _IDS_CONTENEDOR_MENSAJES = ('MessagesList', 'MessageList', 'ConversationList')
 _MAX_ELEMENTOS_UIA = 360
 _MAX_MENSAJES_CONSECUTIVOS = 3
+_MAX_TURNOS_CONTEXTO = 6
 
 
 @dataclass(frozen=True)
@@ -437,6 +439,64 @@ def _es_texto_mensaje_valido(texto: str) -> bool:
     return True
 
 
+def _limpiar_texto_saliente(texto: str) -> str:
+    limpio = _limpiar_texto_uia(texto)
+    if not limpio:
+        return ''
+    sin_prefijo = _RE_PREFIJO_SALIENTE.sub('', limpio).strip()
+    sin_estado = _RE_SUFIJO_HORA_LISTITEM.sub('', sin_prefijo)
+    sin_estado = _RE_SALIENTE_ESTADO.sub('', sin_estado).strip(' ,-')
+    if not sin_estado or _es_ruido_ui(sin_estado):
+        return ''
+    if sin_estado.casefold() in _ESTADOS_SALIENTES_SOLOS:
+        return ''
+    return sin_estado
+
+
+def _agrupar_turnos_desde_reverso(pares_reverso, max_mensajes: int) -> list[str]:
+    """Agrupa párrafos consecutivos del mismo rol ('Cliente'/'Agente') en orden cronológico."""
+    turnos: list[tuple[str, list[str]]] = []
+    ultimo_turno: tuple[str, str] | None = None
+    total_chars = 0
+    limite_suave = min(MAX_LARGO_MENSAJE, 3000)
+    for txt, es_sal in pares_reverso:
+        if es_sal:
+            limpio = _limpiar_texto_saliente(txt)
+            if not limpio:
+                continue
+            rol = 'Agente'
+        else:
+            limpio = txt
+            if not _es_texto_mensaje_valido(limpio):
+                continue
+            rol = 'Cliente'
+        clave_turno = (rol, limpio.casefold())
+        if ultimo_turno == clave_turno:
+            continue
+        if turnos and turnos[-1][0] == rol:
+            if total_chars + len(limpio) + 1 > MAX_LARGO_MENSAJE:
+                continue
+            turnos[-1][1].append(limpio)
+            total_chars += len(limpio) + 1
+        else:
+            if len(turnos) >= max_mensajes:
+                break
+            etiqueta_base = len(rol) + 2 + len(limpio)
+            if turnos and (total_chars >= limite_suave or total_chars + etiqueta_base + 1 > MAX_LARGO_MENSAJE):
+                break
+            turnos.append((rol, [limpio]))
+            total_chars += etiqueta_base + 1
+        ultimo_turno = clave_turno
+    turnos.reverse()
+    seleccion = [
+        f'{rol}: ' + '\n'.join(reversed(frags))[:MAX_LARGO_MENSAJE]
+        for rol, frags in turnos
+    ]
+    if not any(s.startswith('Cliente: ') for s in seleccion):
+        return []
+    return seleccion
+
+
 def _limpiar_texto_listitem(texto: str) -> str:
     limpio = _limpiar_texto_uia(texto)
     if not limpio:
@@ -532,14 +592,18 @@ def _extraer_lista_ultimos_mensajes(
     limite: int = _MAX_MENSAJES_CONSECUTIVOS,
     solo_sin_responder: bool = True,
     incluir_offscreen_en_area: bool = False,
+    incluir_salientes: bool = False,
 ) -> list[str]:
-    """Extrae hasta `limite` mensajes entrantes limpios en orden cronológico.
+    """Extrae hasta `limite` mensajes limpios en orden cronológico.
 
-    Filtra barra lateral, encabezados, fechas, horas, banners centrados, campos
-    de contraseña/edición y mensajes propios (salientes).
-    Si `solo_sin_responder=True`, devuelve [] si el último mensaje es saliente;
-    si es False (lectura bajo demanda), prioriza entrantes tras el último
-    saliente y, si no hay, toma los últimos `limite` entrantes visibles.
+    Filtra barra lateral, encabezados, fechas, horas, banners centrados y campos
+    de contraseña/edición.
+    - Si `incluir_salientes=True`: incluye turnos recientes etiquetados como
+      'Cliente: ...' y 'Agente: ...' para conservar el hilo de la conversación.
+    - Si `incluir_salientes=False` y `solo_sin_responder=True`: devuelve [] si
+      el último mensaje es saliente.
+    - Si `incluir_salientes=False` y `solo_sin_responder=False`: prioriza
+      entrantes tras el último saliente y, si no hay, los últimos entrantes.
     """
     max_mensajes = max(1, int(limite))
     if not nodos:
@@ -686,6 +750,12 @@ def _extraer_lista_ultimos_mensajes(
         return []
 
     def _recoger(*, cortar_en_saliente: bool) -> list[str]:
+        if incluir_salientes:
+            return _agrupar_turnos_desde_reverso(
+                ((item[5], bool(item[6])) for item in reversed(mensajes)),
+                max_mensajes,
+            )
+
         seleccion: list[str] = []
         visto_canon: set[str] = set()
         total_chars = 0
@@ -716,6 +786,9 @@ def _extraer_lista_ultimos_mensajes(
         seleccion.reverse()
         return seleccion
 
+    if incluir_salientes:
+        return _recoger(cortar_en_saliente=False)
+
     if solo_sin_responder:
         if mensajes[-1][6]:
             return []
@@ -736,6 +809,7 @@ def _extraer_nodos_chat(
     modo_area: str = 'ventana',
     limite: int = _MAX_MENSAJES_CONSECUTIVOS,
     max_elementos: int = _MAX_ELEMENTOS_UIA,
+    incluir_salientes: bool = False,
 ) -> tuple[list[str], bool]:
     """Filtra por área antes de recortar y aplica fallback si IsOffscreen=True oculta el chat."""
     recortados = _filtrar_y_recortar_nodos(
@@ -751,6 +825,7 @@ def _extraer_nodos_chat(
         limite=limite,
         solo_sin_responder=False,
         incluir_offscreen_en_area=False,
+        incluir_salientes=incluir_salientes,
     )
     if mensajes:
         return (mensajes, False)
@@ -762,6 +837,7 @@ def _extraer_nodos_chat(
             limite=limite,
             solo_sin_responder=False,
             incluir_offscreen_en_area=True,
+            incluir_salientes=incluir_salientes,
         )
         return (mensajes_off, bool(mensajes_off))
     return ([], False)
@@ -770,8 +846,10 @@ def _extraer_nodos_chat(
 def _extraer_mensajes_de_texto_plano(
     texto_doc: str,
     limite: int = _MAX_MENSAJES_CONSECUTIVOS,
+    *,
+    incluir_salientes: bool = False,
 ) -> list[str]:
-    """Extrae los últimos `limite` mensajes entrantes limpios desde TextPattern de WebView2."""
+    """Extrae los últimos `limite` mensajes limpios desde TextPattern de WebView2."""
     if not isinstance(texto_doc, str) or not texto_doc.strip():
         return []
     max_mensajes = max(1, int(limite))
@@ -823,6 +901,12 @@ def _extraer_mensajes_de_texto_plano(
         return []
 
     def _recoger(*, cortar_en_saliente: bool) -> list[str]:
+        if incluir_salientes:
+            return _agrupar_turnos_desde_reverso(
+                ((txt, bool(es_sal)) for txt, es_sal in reversed(registros)),
+                max_mensajes,
+            )
+
         seleccion: list[str] = []
         vistos: set[str] = set()
         for txt, es_sal in reversed(registros):
@@ -841,6 +925,9 @@ def _extraer_mensajes_de_texto_plano(
                 break
         seleccion.reverse()
         return seleccion
+
+    if incluir_salientes:
+        return _recoger(cortar_en_saliente=False)
 
     if not registros[-1][1]:
         consecutivos = _recoger(cortar_en_saliente=True)
@@ -888,7 +975,7 @@ def _clic_seguro_en_caja(hwnd: int, rc_caja: tuple[int, int, int, int] | None = 
             return False
         pid_wsp = _pid_ventana(int(hwnd))
         en_frente = False
-        for _ in range(4):
+        for _ in range(12):
             fg = u.GetForegroundWindow()
             pid_fg = _pid_ventana(int(fg)) if fg else 0
             if fg == int(hwnd) or (pid_wsp and pid_fg == pid_wsp):
@@ -898,7 +985,9 @@ def _clic_seguro_en_caja(hwnd: int, rc_caja: tuple[int, int, int, int] | None = 
         if not en_frente:
             return False
 
-        rect_win = _rect_hwnd_win32(int(hwnd))
+        rect_win = _rect_hwnd_win32(_hwnd_render_chat(int(hwnd)))
+        if rect_win[2] <= rect_win[0] or rect_win[3] <= rect_win[1]:
+            rect_win = _rect_hwnd_win32(int(hwnd))
         vl, vt, vr, vb = rect_win
         vw, vh = vr - vl, vb - vt
         if rc_caja and rc_caja[2] > rc_caja[0] and rc_caja[3] > rc_caja[1]:
@@ -907,7 +996,7 @@ def _clic_seguro_en_caja(hwnd: int, rc_caja: tuple[int, int, int, int] | None = 
             py = (t + b) // 2
         elif vw >= 300 and vh >= 240:
             px = vl + int(vw * 0.55)
-            py = vb - 36
+            py = max(vt + 20, vb - 44)
         else:
             return False
 
@@ -954,7 +1043,7 @@ def _clic_seguro_en_caja(hwnd: int, rc_caja: tuple[int, int, int, int] | None = 
         up.u.mi = _MOUSEINPUT(0, 0, 0, 0x0004, 0, 0)    # MOUSEEVENTF_LEFTUP
         arr = (_INPUT * 2)(down, up)
         enviado = u.SendInput(2, arr, ctypes.sizeof(_INPUT)) == 2
-        time.sleep(0.04)
+        time.sleep(0.06)
         if tiene_prev:
             u.SetCursorPos(int(prev.x), int(prev.y))
         return bool(enviado)
@@ -1444,6 +1533,7 @@ class _LectorUIA:
         limite: int = _MAX_MENSAJES_CONSECUTIVOS,
         max_elementos: int = _MAX_ELEMENTOS_UIA,
         timeout_seg: float = _TIMEOUT_LECTURA_UIA_SEG,
+        incluir_salientes: bool = False,
     ) -> DiagnosticoLectura:
         t0 = time.monotonic()
         deadline = t0 + max(0.3, float(timeout_seg))
@@ -1646,6 +1736,7 @@ class _LectorUIA:
                 modo_area=modo_area,
                 limite=tope_mensajes,
                 max_elementos=tope_elementos,
+                incluir_salientes=incluir_salientes,
             )
             if mensajes:
                 return _resultado(
@@ -1674,7 +1765,11 @@ class _LectorUIA:
                     texto_tp = self._leer_text_pattern(cand, max_chars=_MAX_CHARS_TEXT_PATTERN)
                     if texto_tp.strip():
                         chars_tp = max(chars_tp, len(texto_tp))
-                        msgs_tp = _extraer_mensajes_de_texto_plano(texto_tp, limite=tope_mensajes)
+                        msgs_tp = _extraer_mensajes_de_texto_plano(
+                            texto_tp,
+                            limite=tope_mensajes,
+                            incluir_salientes=incluir_salientes,
+                        )
                         if msgs_tp:
                             return _resultado(
                                 msgs_tp,
@@ -1692,7 +1787,11 @@ class _LectorUIA:
                         texto_tp = self._leer_text_pattern(el_doc_buscado, max_chars=_MAX_CHARS_TEXT_PATTERN)
                         if texto_tp.strip():
                             chars_tp = max(chars_tp, len(texto_tp))
-                            msgs_tp = _extraer_mensajes_de_texto_plano(texto_tp, limite=tope_mensajes)
+                            msgs_tp = _extraer_mensajes_de_texto_plano(
+                                texto_tp,
+                                limite=tope_mensajes,
+                                incluir_salientes=incluir_salientes,
+                            )
                             if msgs_tp:
                                 return _resultado(
                                     msgs_tp,
@@ -1744,12 +1843,14 @@ class _LectorUIA:
         limite: int = _MAX_MENSAJES_CONSECUTIVOS,
         max_elementos: int = _MAX_ELEMENTOS_UIA,
         timeout_seg: float = _TIMEOUT_LECTURA_UIA_SEG,
+        incluir_salientes: bool = False,
     ) -> list[str]:
         diag = self.leer_ultimos_textos_con_diagnostico(
             hwnd,
             limite=limite,
             max_elementos=max_elementos,
             timeout_seg=timeout_seg,
+            incluir_salientes=incluir_salientes,
         )
         return list(diag.mensajes)
 
@@ -1761,11 +1862,11 @@ class _LectorUIA:
         return unido or None
 
     def enfocar_caja_mensaje(self, hwnd: int) -> bool:
-        """Enfoca el cuadro de escritura de WhatsApp usando IUIAutomationElement::SetFocus (slot 3)."""
+        """Enfoca el cuadro de escritura de WhatsApp vía UIA SetFocus y/o clic seguro."""
         hr_init = self._ole32.CoInitializeEx(None, _COINIT_MULTITHREADED)
         debe_desinicializar = hr_init in (0, 1)
         if hr_init < 0 and hr_init != _RPC_E_CHANGED_MODE:
-            return False
+            return _clic_seguro_en_caja(int(hwnd), None)
 
         hwnd_render = _hwnd_render_chat(int(hwnd))
         uia = ctypes.c_void_p()
@@ -1773,6 +1874,8 @@ class _LectorUIA:
         cond_edit = ctypes.c_void_p()
         arr = ctypes.c_void_p()
         elementos_vivos: list[ctypes.c_void_p] = []
+        foco_uia = False
+        rc_caja: tuple[int, int, int, int] | None = None
         try:
             clsid = (ctypes.c_byte * 16).from_buffer_copy(_CLSID_CUIAUTOMATION)
             iid = (ctypes.c_byte * 16).from_buffer_copy(_IID_IUIAUTOMATION)
@@ -1780,69 +1883,71 @@ class _LectorUIA:
                 ctypes.byref(clsid), None, _CLSCTX_INPROC_SERVER,
                 ctypes.byref(iid), ctypes.byref(uia),
             )
-            if hr != 0 or not uia.value:
-                return False
-
-            hr = self._vcall(
-                uia, 6, ctypes.c_long,
-                [wintypes.HWND, ctypes.POINTER(ctypes.c_void_p)],
-                wintypes.HWND(hwnd_render), ctypes.byref(raiz),
-            )
-            if (hr != 0 or not raiz.value) and hwnd_render != int(hwnd):
+            if hr == 0 and uia.value:
                 hr = self._vcall(
                     uia, 6, ctypes.c_long,
                     [wintypes.HWND, ctypes.POINTER(ctypes.c_void_p)],
-                    wintypes.HWND(int(hwnd)), ctypes.byref(raiz),
+                    wintypes.HWND(hwnd_render), ctypes.byref(raiz),
                 )
-            if hr != 0 or not raiz.value:
-                return False
+                if (hr != 0 or not raiz.value) and hwnd_render != int(hwnd):
+                    hr = self._vcall(
+                        uia, 6, ctypes.c_long,
+                        [wintypes.HWND, ctypes.POINTER(ctypes.c_void_p)],
+                        wintypes.HWND(int(hwnd)), ctypes.byref(raiz),
+                    )
 
-            rect_ventana = self._rect_elemento(raiz, cached=False)
-            cond_edit = self._crear_condicion_i4(uia, _UIA_PROP_CONTROL_TYPE, _UIA_CTRL_EDIT)
-            if not cond_edit.value:
-                return False
+            if raiz.value:
+                rect_ventana = self._rect_elemento(raiz, cached=False)
+                cond_edit = self._crear_condicion_i4(uia, _UIA_PROP_CONTROL_TYPE, _UIA_CTRL_EDIT)
+                if cond_edit.value:
+                    hr_fa = self._vcall(
+                        raiz, 6, ctypes.c_long,
+                        [ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)],
+                        _UIA_TREESCOPE_DESCENDANTS, cond_edit, ctypes.byref(arr),
+                    )
+                    if hr_fa == 0 and arr.value:
+                        total = self._leer_prop_int(arr, 3)
+                        candidatos: list[tuple[int, str, tuple[int, int, int, int]]] = []
+                        candidatos_off: list[tuple[int, str, tuple[int, int, int, int]]] = []
+                        for idx in range(min(max(0, total), 40)):
+                            elem = ctypes.c_void_p()
+                            hr_get = self._vcall(
+                                arr, 4, ctypes.c_long,
+                                [ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)],
+                                idx, ctypes.byref(elem),
+                            )
+                            if hr_get != 0 or not elem.value:
+                                continue
+                            es_pw = bool(self._leer_prop_int(elem, 35))
+                            if es_pw:
+                                self._liberar(elem)
+                                continue
+                            fuera = bool(self._leer_prop_int(elem, 38))
+                            nombre = self._leer_prop_str(elem, 23)
+                            rc = self._rect_elemento(elem, cached=False)
+                            if fuera and (rc[2] <= rc[0] or rc[3] <= rc[1]):
+                                self._liberar(elem)
+                                continue
+                            pos = len(elementos_vivos)
+                            elementos_vivos.append(elem)
+                            if fuera:
+                                candidatos_off.append((pos, nombre, rc))
+                            else:
+                                candidatos.append((pos, nombre, rc))
 
-            # Un único FindAll (slot 6) sobre el render HWND de controles Edit visibles no-contraseña
-            hr_fa = self._vcall(
-                raiz, 6, ctypes.c_long,
-                [ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)],
-                _UIA_TREESCOPE_DESCENDANTS, cond_edit, ctypes.byref(arr),
-            )
-            if hr_fa != 0 or not arr.value:
-                return False
+                        elegido = _seleccionar_caja_mensaje(candidatos, rect_ventana)
+                        if elegido is None and candidatos_off:
+                            elegido = _seleccionar_caja_mensaje(candidatos_off, rect_ventana)
+                            lista_elegida = candidatos_off
+                        else:
+                            lista_elegida = candidatos
+                        if elegido is not None:
+                            for pos_e, _nom_e, rc_e in lista_elegida:
+                                if pos_e == elegido:
+                                    rc_caja = rc_e
+                                    break
+                            foco_uia = self._vcall(elementos_vivos[elegido], 3, ctypes.c_long, []) == 0
 
-            total = self._leer_prop_int(arr, 3)
-            if total <= 0:
-                return False
-
-            candidatos: list[tuple[int, str, tuple[int, int, int, int]]] = []
-            for idx in range(min(total, 40)):
-                elem = ctypes.c_void_p()
-                hr_get = self._vcall(
-                    arr, 4, ctypes.c_long,
-                    [ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)],
-                    idx, ctypes.byref(elem),
-                )
-                if hr_get != 0 or not elem.value:
-                    continue
-                es_pw = bool(self._leer_prop_int(elem, 35))
-                fuera = bool(self._leer_prop_int(elem, 38))
-                if es_pw or fuera:
-                    self._liberar(elem)
-                    continue
-                nombre = self._leer_prop_str(elem, 23)
-                rc = self._rect_elemento(elem, cached=False)
-                pos = len(elementos_vivos)
-                elementos_vivos.append(elem)
-                candidatos.append((pos, nombre, rc))
-
-            elegido = _seleccionar_caja_mensaje(candidatos, rect_ventana)
-            foco_uia = False
-            rc_caja = None
-            if elegido is not None:
-                rc_caja = candidatos[elegido][2]
-                # IUIAutomationElement::SetFocus -> slot 3 (verificado en UIAutomationCore.dll)
-                foco_uia = self._vcall(elementos_vivos[elegido], 3, ctypes.c_long, []) == 0
             clic_ok = _clic_seguro_en_caja(int(hwnd), rc_caja)
             return bool(foco_uia or clic_ok)
         finally:
@@ -1961,8 +2066,13 @@ class LectorChat:
         except Exception:
             return None
 
-    def leer_ultimos_mensajes(self, ventana: VentanaChat | None = None, limite: int = 3) -> list[str]:
-        """Devuelve hasta `limite` mensajes entrantes limpios (en orden cronológico).
+    def leer_ultimos_mensajes(
+        self,
+        ventana: VentanaChat | None = None,
+        limite: int = 3,
+        incluir_salientes: bool = False,
+    ) -> list[str]:
+        """Devuelve hasta `limite` mensajes limpios (en orden cronológico).
 
         Devuelve [] limpiamente fuera de Windows, para ventanas no permitidas
         o si UI Automation no está disponible o falla. Nunca escribe en disco.
@@ -1976,7 +2086,15 @@ class LectorChat:
             tope = max(1, int(limite))
             lector = _LectorUIA()
             if hasattr(lector, 'leer_ultimos_textos'):
-                crudos = lector.leer_ultimos_textos(int(objetivo.hwnd), limite=tope)
+                if incluir_salientes:
+                    try:
+                        crudos = lector.leer_ultimos_textos(
+                            int(objetivo.hwnd), limite=tope, incluir_salientes=True
+                        )
+                    except TypeError:
+                        crudos = lector.leer_ultimos_textos(int(objetivo.hwnd), limite=tope)
+                else:
+                    crudos = lector.leer_ultimos_textos(int(objetivo.hwnd), limite=tope)
             else:
                 unico = lector.leer_ultimo_texto(int(objetivo.hwnd))
                 crudos = [l for l in (unico or '').splitlines() if l.strip()]
@@ -2159,6 +2277,30 @@ class PuenteWhatsAppWeb:
                     'remitente': remitente.strip()[:200],
                     'origen': 'web',
                 }
+                rol_raw = datos.get('rol')
+                if isinstance(rol_raw, str) and rol_raw.strip().casefold() in ('cliente', 'agente'):
+                    metadatos['rol'] = rol_raw.strip().casefold()
+                turnos_raw = datos.get('turnos')
+                if isinstance(turnos_raw, list):
+                    turnos_limpios = []
+                    for item in turnos_raw[:12]:
+                        if not isinstance(item, dict):
+                            continue
+                        t_rol = item.get('rol')
+                        t_txt = item.get('texto')
+                        if (
+                            isinstance(t_rol, str)
+                            and t_rol.strip().casefold() in ('cliente', 'agente')
+                            and isinstance(t_txt, str)
+                            and t_txt.strip()
+                            and len(t_txt) <= MAX_LARGO_MENSAJE
+                        ):
+                            turnos_limpios.append({
+                                'rol': t_rol.strip().casefold(),
+                                'texto': t_txt.strip(),
+                            })
+                    if turnos_limpios:
+                        metadatos['turnos'] = turnos_limpios
                 try:
                     if al_mensaje is not None:
                         al_mensaje(texto.strip(), metadatos)

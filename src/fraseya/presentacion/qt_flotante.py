@@ -357,7 +357,7 @@ class BarraFlotanteIA(_VentanaFlotanteBase):
         self.btn_leer_chat = QPushButton('Leer últimos 3', self.marco)
         self.btn_leer_chat.setObjectName('btn_leer_chat')
         self.btn_leer_chat.setCursor(Qt.PointingHandCursor)
-        self.btn_leer_chat.setToolTip('Leer los últimos 3 mensajes entrantes de WhatsApp y sugerir 3 respuestas')
+        self.btn_leer_chat.setToolTip('Leer los últimos mensajes del chat (cliente y agente) y sugerir 3 respuestas')
         self.btn_leer_chat.clicked.connect(self._invocar_leer_chat)
         fila_acciones.addWidget(self.btn_leer_chat)
 
@@ -1473,6 +1473,13 @@ class ControladorFlotanteQt(QObject):
             return
         self.barra.adjustSize()
         self.barra.show()
+        vivas = []
+        for tarjeta in self.tarjetas:
+            if _qt_valido(tarjeta):
+                tarjeta.adjustSize()
+                tarjeta.show()
+                vivas.append(tarjeta)
+        self.tarjetas = vivas
         self.reposicionar(rect_chat if rect_chat is not None else self._ultimo_rect_chat)
 
     def mostrar_sugerencias(self, resultado, rect_chat=None):
@@ -1643,6 +1650,27 @@ class ControladorFlotanteQt(QObject):
                 except RuntimeError:
                     pass
         self.tarjetas.clear()
+
+    def esta_visible(self) -> bool:
+        if not self._barra_viva():
+            return False
+        if self.barra.isVisible():
+            return True
+        return any(_qt_valido(t) and t.isVisible() for t in self.tarjetas)
+
+    def ocultar_temporalmente(self):
+        """Oculta barra y tarjetas al cambiar de ventana sin destruir las sugerencias activas."""
+        for tarjeta in self.tarjetas:
+            if _qt_valido(tarjeta):
+                try:
+                    tarjeta.hide()
+                except RuntimeError:
+                    pass
+        if self.barra is not None and _qt_valido(self.barra):
+            try:
+                self.barra.hide()
+            except RuntimeError:
+                pass
 
     def ocultar_todo(self):
         self.ocultar_sugerencias()

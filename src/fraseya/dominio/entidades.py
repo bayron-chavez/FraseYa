@@ -1,11 +1,15 @@
 """Entidades del problema: frases, categorías y versiones del catálogo."""
-import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-COMPARTIDA = 'compartida'
-PROPIA = 'propia'
-_MARCADOR = re.compile(r'\{(\w+)\}')
+from .reglas import (
+    COLOR_DEFECTO,
+    COMPARTIDA,
+    ORIGENES_VALIDOS,
+    PROPIA,
+    extraer_marcadores,
+    validar_color_hex,
+)
 
 
 def _texto(valor, campo):
@@ -39,10 +43,9 @@ class Frase:
         self.titulo = _texto(self.titulo, 'Título')
         self.abreviatura = _texto(self.abreviatura, 'Abreviatura')
         self.contenido = _texto(self.contenido, 'Contenido')
-        if self.origen not in (PROPIA, COMPARTIDA):
+        if self.origen not in ORIGENES_VALIDOS:
             raise ValueError(f'Origen inválido: {self.origen}')
-        nombres = list(dict.fromkeys(_MARCADOR.findall(self.contenido)))
-        self.variables = [Variable(n, i) for i, n in enumerate(nombres)]
+        self.variables = [Variable(n, i) for i, n in enumerate(extraer_marcadores(self.contenido))]
 
     @property
     def es_compartida(self):
@@ -56,11 +59,9 @@ class Frase:
 class Categoria:
     """Compone frases; cada frase pertenece a una sola categoría."""
 
-    def __init__(self, nombre, color='#64748B', id=None):
+    def __init__(self, nombre, color=COLOR_DEFECTO, id=None):
         self.nombre = _texto(nombre, 'Nombre de la categoría')
-        if not re.fullmatch(r'#[0-9A-Fa-f]{6}', color):
-            raise ValueError('El color debe tener formato #RRGGBB')
-        self.color = color
+        self.color = validar_color_hex(color)
         self.id = id
         self.frases = []
 

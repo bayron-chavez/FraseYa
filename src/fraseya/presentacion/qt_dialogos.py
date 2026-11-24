@@ -1,30 +1,22 @@
-"""Diálogos Qt (arranque y expansión global) y envoltorios de compatibilidad."""
+"""Diálogos Qt de arranque y expansión global."""
 from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QVBoxLayout, QFormLayout, QLineEdit,
-    QTextEdit, QDialogButtonBox, QMessageBox, QScrollArea, QWidget,
+    QDialog, QVBoxLayout, QLineEdit,
+    QTextEdit, QDialogButtonBox, QMessageBox, QScrollArea,
 )
+from .identidad import recurso
 from .qt_paneles import (
-    ESTILO, boton, EtiquetaSegura as QLabel, Trabajos,
-    PanelIA, PanelEmpresa, PanelAjustes,
+    boton, EtiquetaSegura as QLabel, FormularioVariablesQt, Trabajos,
 )
-
-
-def _estilo_actual():
-    app = QApplication.instance()
-    if app is not None:
-        qss = app.styleSheet()
-        if qss:
-            return qss
-    return ESTILO
+from .qt_temas import estilo_actual
 
 
 class DialogoRed(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setStyleSheet(_estilo_actual())
+        self.setStyleSheet(estilo_actual())
         self.trabajos = Trabajos(self)
         self.ocupada = False
         self.setWindowIcon(QIcon(str(recurso('fraseya.ico'))))
@@ -41,11 +33,6 @@ class DialogoRed(QDialog):
         else:
             self.trabajos.detener()
             event.accept()
-
-
-def recurso(nombre):
-    import sys
-    return Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[3])) / 'assets' / nombre
 
 
 class AccesoQt(DialogoRed):
@@ -115,7 +102,7 @@ def configurar_conexion(ruta, parent=None):
     from fraseya.infraestructura.supabase import validar_conexion
     import json
     d = QDialog(parent)
-    d.setStyleSheet(_estilo_actual())
+    d.setStyleSheet(estilo_actual())
     d.setWindowTitle('Conexión de FraseYa')
     d.resize(570, 280)
     l = QVBoxLayout(d)
@@ -148,169 +135,47 @@ def configurar_conexion(ruta, parent=None):
 
 def completar_variables(parent, contenido, nombres=None, iniciales=None, flotante=False):
     """Usado por la expansión global desde aplicaciones externas."""
-    from fraseya.aplicacion.resolver_variables import detectar, sustituir, valores_iniciales, faltantes
-    nombres = nombres or detectar(contenido)
-    iniciales = iniciales or valores_iniciales(nombres)
     usar_flotante = bool(flotante or parent is None)
     d = QDialog(None if usar_flotante else parent)
     if usar_flotante:
         d.setWindowFlags(d.windowFlags() | Qt.WindowStaysOnTopHint)
     d.setWindowTitle('Completar campos')
-    d.setStyleSheet(_estilo_actual())
+    d.setStyleSheet(estilo_actual())
     d.resize(570, 450)
     l = QVBoxLayout(d)
     l.addWidget(QLabel('Vista previa de la respuesta'))
     preview = QTextEdit()
+    preview.setObjectName('preview')
     preview.setReadOnly(True)
     l.addWidget(preview)
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
-    cuerpo = QWidget()
-    cuerpo.setObjectName('scroll_content')
-    form = QFormLayout(cuerpo)
-    entradas = {}
-
-    def actualizar():
-        preview.setPlainText(sustituir(contenido, {n: e.text() for n, e in entradas.items()}))
-        foco = d.focusWidget()
-        for n, e in entradas.items():
-            if e is foco:
-                cursor = preview.document().find(e.text() or '{' + n + '}')
-                if not cursor.isNull():
-                    preview.setTextCursor(cursor)
-                break
-
-    for n in nombres:
-        entrada = QLineEdit(iniciales.get(n, ''))
-        entradas[n] = entrada
-        entrada.textChanged.connect(actualizar)
-        form.addRow(QLabel(n.replace('_', ' ').capitalize()), entrada)
-    scroll.setWidget(cuerpo)
     l.addWidget(scroll)
     botones = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
     l.addWidget(botones)
 
     def aceptar():
-        if faltantes(nombres, {n: e.text() for n, e in entradas.items()}):
+        if formulario.campos_faltantes():
             QMessageBox.warning(d, 'Campos pendientes', 'Complete todos los campos.')
             return
         d.accept()
 
+    formulario = FormularioVariablesQt(scroll, preview, al_confirmar=aceptar)
+    formulario.cargar(contenido, nombres=nombres, iniciales=iniciales)
+
     botones.accepted.connect(aceptar)
     botones.rejected.connect(d.reject)
-    actualizar()
     if usar_flotante:
         d.show()
         try:
             from fraseya.infraestructura.teclado_global import forzar_primer_plano
             forzar_primer_plano(int(d.winId()))
-        except Exception:
+        except OSError:
             pass
         d.raise_()
         d.activateWindow()
-        if nombres and nombres[0] in entradas:
-            entradas[nombres[0]].setFocus()
+        if formulario.nombres and formulario.nombres[0] in formulario.entradas:
+            formulario.entradas[formulario.nombres[0]].setFocus()
     if d.exec() != QDialog.Accepted:
         return None
-    return {n: e.text().strip() for n, e in entradas.items()}
-
-
-class EmpresaQt(DialogoRed):
-    """Envoltorio de compatibilidad sobre PanelEmpresa."""
-    def __init__(self, parent, cliente):
-        super().__init__(parent)
-        self.setWindowTitle('Perfil de empresa')
-        self.resize(630, 650)
-        l = QVBoxLayout(self)
-        l.setContentsMargins(20, 20, 20, 20)
-        self.panel = PanelEmpresa(cliente, parent=self, trabajos=self.trabajos)
-        l.addWidget(self.panel)
-        self.campos = self.panel.campos
-        self.aviso = self.panel.aviso
-        self.boton = self.panel.boton
-        self.panel.recargar()
-
-    @property
-    def ocupada(self):
-        return self.panel.ocupada if hasattr(self, 'panel') else False
-
-    @ocupada.setter
-    def ocupada(self, valor):
-        if hasattr(self, 'panel'):
-            self.panel.ocupada = valor
-
-    def guardar(self):
-        self.panel.guardar()
-
-
-class IAQt(DialogoRed):
-    """Envoltorio de compatibilidad sobre PanelIA."""
-    def __init__(self, parent, cliente, gestion, administrador=False):
-        super().__init__(parent)
-        self.parent_window = parent
-        self.setWindowTitle('FraseYa · Asistente IA')
-        self.resize(860, 680)
-        l = QVBoxLayout(self)
-        l.setContentsMargins(20, 20, 20, 20)
-
-        def al_elegir(ident):
-            if parent is not None:
-                parent.refrescar()
-                parent.mostrar_id(ident)
-            self.accept()
-
-        def al_actualizar():
-            if parent is not None:
-                parent.refrescar()
-                parent.frases_cambiaron()
-
-        abrir_empresa = (lambda: EmpresaQt(self, cliente).exec()) if administrador else None
-        self.panel = PanelIA(
-            gestion, cliente, administrador,
-            al_elegir=al_elegir, al_actualizar=al_actualizar,
-            al_abrir_empresa=abrir_empresa, parent=self, trabajos=self.trabajos,
-        )
-        l.addWidget(self.panel)
-        self.gestion = gestion
-        self.servicio = self.panel.servicio
-        self.mensaje = self.panel.mensaje
-        self.consultar = self.panel.consultar
-        self.aviso = self.panel.aviso
-        self.resultados = self.panel.resultados
-
-    @property
-    def ocupada(self):
-        return self.panel.ocupada if hasattr(self, 'panel') else False
-
-    @ocupada.setter
-    def ocupada(self, valor):
-        if hasattr(self, 'panel'):
-            self.panel.ocupada = valor
-
-    def pegar(self):
-        self.panel.pegar()
-
-    def sugerir(self):
-        self.panel.sugerir()
-
-    def elegir(self, frase):
-        self.panel.elegir(frase)
-
-
-class AjustesQt(QDialog):
-    """Envoltorio de compatibilidad sobre PanelAjustes."""
-    def __init__(self, parent, configuracion, al_guardar):
-        super().__init__(parent)
-        self.setStyleSheet(_estilo_actual())
-        self.setWindowTitle('Configuración')
-        self.resize(580, 420)
-        l = QVBoxLayout(self)
-        l.setContentsMargins(20, 20, 20, 20)
-
-        def guardar_y_cerrar(cambios):
-            if al_guardar:
-                al_guardar(cambios)
-            self.accept()
-
-        self.panel = PanelAjustes(configuracion, al_guardar=guardar_y_cerrar, parent=self)
-        l.addWidget(self.panel)
+    return formulario.valores_limpios()

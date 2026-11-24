@@ -1,1 +1,11 @@
-{"private":true,"type":"module","scripts":{"test":"node auditoria.mjs"},"devDependencies":{"@electric-sql/pglite":"0.5.8"}}
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test ia.mjs extension_wsp.test.mjs",
+    "test:db": "node auditoria.mjs && node ia_permisos.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
+  }
+}

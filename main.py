@@ -19,7 +19,6 @@ if __name__ == '__main__':
         from PySide6.QtWidgets import QApplication
         from fraseya.presentacion.qt_vista import VentanaQt
         from fraseya.aplicacion.gestion_frases import GestionFrases
-        from fraseya.aplicacion.importacion_excel import importar_excel
         with RepositorioSQLite(':memory:') as repo:
             assert repo.db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
             app = QApplication.instance() or QApplication([])

@@ -33,9 +33,10 @@ administrador. Los permisos de publicación siguen comprobándose en PostgreSQL.
 
 La recuperación de SQLite se probó terminando un proceso con una transacción
 abierta: la reapertura conserva las frases y versión anterior y pasa integrity_check.
-La revisión actual de dependencias, incluidas Pillow, pystray y defusedxml, no
-encontró vulnerabilidades conocidas. Consulta `DEPENDENCIAS_AUDITADAS.txt` para
-las versiones revisadas. Esto no constituye una garantía frente a nuevos ataques.
+La revisión actual de dependencias, incluidas Pillow, PySide6 y defusedxml, no
+encontró vulnerabilidades conocidas en la fecha auditada. Consulta `DEPENDENCIAS_AUDITADAS.txt`.
+La aplicación utiliza exclusivamente PySide6 como interfaz gráfica y bandeja del sistema (`QSystemTrayIcon`),
+habiendo retirado CustomTkinter y `pystray`. Esto no constituye una garantía frente a nuevos ataques.
 
 Referencias: [límites de Supabase Auth](https://supabase.com/docs/guides/auth/rate-limits)
 y [configuración de producción](https://supabase.com/docs/guides/deployment/going-into-prod).
@@ -87,11 +88,11 @@ que se conserva literalmente y que las tablas siguen existiendo.
 
 ## Riesgos y controles pendientes
 
-1. La copia SQLite está en texto claro. Trabajar sin conexión abre los datos
-   del perfil de Windows sin autenticar remotamente. Varias cuentas que usen
-   el mismo perfil no tienen frases personales aisladas por correo. Usar
-   perfiles de Windows separados; cifrado local y separación por cuenta serían
-   cambios adicionales de producto, no implementados en esta revisión.
+1. La copia SQLite está en texto claro. Trabajar sin conexión abre la copia
+   local del último perfil conectado (conservando su catálogo sincronizado y frases
+   propias en el perfil de Windows) o la base inicial si nunca hubo sesión online.
+   Varias cuentas que usen el mismo perfil de Windows no tienen aislamiento criptográfico local.
+   Usar perfiles de Windows separados si se comparte el equipo.
 2. Quien administra el proyecto Supabase o posee una service_role/secret key
    puede saltarse RLS. No distribuir esas claves en el ejecutable ni GitHub.
    Revisar los administradores del dashboard y habilitar MFA en esas cuentas.

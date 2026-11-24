@@ -266,6 +266,26 @@ def test_insertar_aborta_sin_escribir_si_antes_de_escribir_devuelve_false():
     assert eventos == [(False, 'sin_foco')]
 
 
+def test_insertar_aborta_si_antes_de_escribir_lanza_excepcion():
+    m, escritor, _ = motor()
+    eventos = []
+
+    def explotar():
+        raise RuntimeError('UIA bloqueada')
+
+    assert m.insertar(
+        'Hola',
+        100,
+        antes_de_escribir=explotar,
+        al_terminar=lambda ok, err: eventos.append((ok, err)),
+    ) is True
+    assert escritor.llamadas == []
+    assert eventos == [(False, 'sin_foco')]
+    # El motor queda libre para futuras inserciones
+    assert m.insertar('Segundo intento', 100) is True
+    assert escritor.llamadas == [(0, 'Segundo intento')]
+
+
 def test_insertar_reporta_error_si_escritor_falla():
     m, escritor, _ = motor()
     escritor.reemplazar = lambda *_: (_ for _ in ()).throw(OSError('SendInput falló (error 5).'))

@@ -2,22 +2,23 @@
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
-import unicodedata
-from zipfile import ZipFile, BadZipFile
+from zipfile import BadZipFile, ZipFile
 
+import defusedxml  # noqa: F401 - Exige el parser protegido que openpyxl detecta al importar.
 from openpyxl import load_workbook
-import defusedxml  # Exige el parser protegido que openpyxl detecta al importar.
+
+from fraseya.dominio.reglas import (
+    COLOR_DEFECTO,
+    normalizar_texto,
+    validar_datos_frase,
+    validar_nombre_categoria,
+)
 
 
 @dataclass
 class ResultadoImportacion:
     importadas: int = 0
     rechazadas: list = field(default_factory=list)
-
-
-def _normalizar(valor):
-    return ''.join(c for c in unicodedata.normalize('NFD', str(valor or '').strip().lower())
-                   if unicodedata.category(c) != 'Mn')
 
 
 def importar_excel(ruta, gestion, autenticacion=None, sesion=None):
@@ -37,6 +38,7 @@ def importar_excel(ruta, gestion, autenticacion=None, sesion=None):
         libro = load_workbook(BytesIO(datos), read_only=True, data_only=False, keep_links=False)
     except (BadZipFile, KeyError) as error:
         raise ValueError('El archivo Excel no es válido.') from error
+
     resultado = ResultadoImportacion()
     try:
         hoja = libro.active
@@ -44,11 +46,14 @@ def importar_excel(ruta, gestion, autenticacion=None, sesion=None):
             raise ValueError('El archivo supera el límite de 10000 filas de datos.')
         filas = hoja.iter_rows(max_row=10002, max_col=4)
         cabecera = next(filas)
-        if [_normalizar(c.value) for c in cabecera] != ['categoria', 'titulo', 'abreviatura', 'contenido']:
+        if [normalizar_texto(str(c.value or '')).strip() for c in cabecera] != ['categoria', 'titulo', 'abreviatura', 'contenido']:
             raise ValueError('Las columnas deben ser: categoría, título, abreviatura, contenido, en ese orden.')
+
         categorias = {c['nombre'].casefold(): c for c in gestion.categorias_propias()}
         abreviaturas = {f['abreviatura'].casefold() for f in gestion.repo.listar_frases()}
+        catalogo_propio_id = gestion._catalogo_propio()
         admin_verificado = False
+
         for numero, fila in enumerate(filas, start=2):
             if all(c.value is None for c in fila):
                 continue
@@ -57,15 +62,14 @@ def importar_excel(ruta, gestion, autenticacion=None, sesion=None):
             try:
                 if any(c.data_type == 'f' or not isinstance(c.value, str) for c in fila):
                     raise ValueError('Usa texto en las cuatro columnas; no se admiten fórmulas.')
-                categoria, titulo, abreviatura, contenido = (c.value.strip() for c in fila)
-                if not categoria or len(categoria) > 200:
-                    raise ValueError('Categoría vacía o demasiado larga.')
-                if not abreviatura or any(c.isspace() for c in abreviatura):
-                    raise ValueError('La abreviatura no puede estar vacía ni contener espacios.')
+                categoria_raw, titulo, abreviatura, contenido = (c.value.strip() for c in fila)
+                categoria = validar_nombre_categoria(categoria_raw)
+                errores = validar_datos_frase(titulo, abreviatura, contenido)
+                if errores:
+                    raise ValueError(errores[0])
                 if abreviatura.casefold() in abreviaturas:
                     raise ValueError('La abreviatura ya está en uso.')
-                if not titulo or len(titulo) > 500 or not contenido or len(contenido) > 100000 or len(abreviatura) > 100:
-                    raise ValueError('Título, abreviatura o contenido vacío o demasiado largo.')
+
                 cat = categorias.get(categoria.casefold())
                 if cat is None:
                     if autenticacion is None or sesion is None:
@@ -73,12 +77,18 @@ def importar_excel(ruta, gestion, autenticacion=None, sesion=None):
                     if not admin_verificado:
                         autenticacion.validar(sesion, administrador=True)
                         admin_verificado = True
-                with gestion.repo.db:
-                    if cat is None:
-                        ident = gestion.repo.db.execute('INSERT INTO CATEGORIA(catalogo_id,nombre,color) VALUES(?,?,?)',
-                            (gestion._catalogo_propio(), categoria, '#64748B')).lastrowid
-                        cat = {'id': ident, 'nombre': categoria}
-                    gestion.repo._crear_frase(cat['id'], titulo, abreviatura, contenido, 'propia')
+
+                cat_id, _frase_id, _creada = gestion.repo.importar_frase_en_categoria(
+                    catalogo_propio_id,
+                    categoria,
+                    titulo,
+                    abreviatura,
+                    contenido,
+                    categoria_id=cat['id'] if cat is not None else None,
+                    color=COLOR_DEFECTO,
+                )
+                if cat is None:
+                    cat = {'id': cat_id, 'nombre': categoria}
                 categorias[categoria.casefold()] = cat
                 abreviaturas.add(abreviatura.casefold())
                 resultado.importadas += 1

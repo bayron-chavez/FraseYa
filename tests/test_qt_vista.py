@@ -176,7 +176,9 @@ def test_publicar_y_retirar_integrados_sin_dialogos(app):
 def test_cambio_tema_barra_lateral_ajustes_y_persistencia(app, tmp_path):
     from PySide6.QtWidgets import QLabel as QtLabel
     from fraseya.aplicacion.configuracion import Configuracion
-    from fraseya.presentacion.qt_dialogos import AjustesQt, DialogoRed
+    from fraseya.infraestructura.escritor_texto import VELOCIDAD_MAX_MS, VELOCIDAD_MIN_MS
+    from fraseya.presentacion.qt_dialogos import DialogoRed
+    from fraseya.presentacion.qt_paneles import PanelAjustes
     from fraseya.presentacion.qt_temas import ESTILO, ESTILO_OSCURO
 
     ruta = tmp_path / 'tema_persistencia.db'
@@ -194,6 +196,8 @@ def test_cambio_tema_barra_lateral_ajustes_y_persistencia(app, tmp_path):
         v.al_cambiar_tema = temas_notificados.append
         v.al_configurar = ajustes_notificados.append
 
+        assert v.panel_ajustes.velocidad.minimum() == VELOCIDAD_MIN_MS
+        assert v.panel_ajustes.velocidad.maximum() == VELOCIDAD_MAX_MS
         assert v.tema_actual == 'claro'
         assert v.btn_tema.objectName() == 'theme_toggle'
         assert v.btn_tema.text() == 'Tema oscuro'
@@ -217,11 +221,9 @@ def test_cambio_tema_barra_lateral_ajustes_y_persistencia(app, tmp_path):
         dlg.close()
         dlg.deleteLater()
 
-        dlg_aj = AjustesQt(v, Configuracion(repo), None)
-        assert dlg_aj.styleSheet() == ESTILO_OSCURO
-        assert dlg_aj.panel.tema.currentData() == 'oscuro'
-        dlg_aj.close()
-        dlg_aj.deleteLater()
+        panel_aj = PanelAjustes(Configuracion(repo))
+        assert panel_aj.tema.currentData() == 'oscuro'
+        panel_aj.deleteLater()
 
         # Restablecer y guardar desde PanelAjustes vuelve a 'claro'
         v.ajustes()
@@ -320,3 +322,127 @@ def test_panel_ia_modo_vivo_toggle_demo_y_callbacks(app):
 
         v.close()
         assert v._controlador_vivo_demo is None
+
+
+def test_publicar_limpia_operaciones_categorias_pendientes(app):
+    import time
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    with RepositorioSQLite(':memory:') as repo:
+        g = GestionFrases(repo)
+        auth = Mock()
+        auth.cliente.url = 'https://example.supabase.co'
+        sesion = Sesion('admin@example.test', 'administrador', 'token')
+        cat_id = g.crear_categoria('Ventas', auth, sesion)
+        g.editar_categoria(cat_id, 'Comercial', '#123456', auth, sesion)
+        assert len(g.operaciones_categorias()) == 1
+
+        v = VentanaQt(g, demostracion=False, autenticacion=auth, sesion=sesion)
+        servicio_falso = Mock()
+        servicio_falso.recoger_categorias.return_value = []
+        servicio_falso.preparar.return_value = SimpleNamespace(
+            version=5, cantidad_frases=0, nuevas=0, modificadas=0, eliminadas=0
+        )
+        servicio_falso.publicar.return_value = SimpleNamespace(version=5)
+        with patch('fraseya.aplicacion.publicacion_supabase.PublicacionSupabase', return_value=servicio_falso):
+            v.publicar(False)
+            limite = time.monotonic() + 3
+            while v.panel_catalogo.ocupada and time.monotonic() < limite:
+                app.processEvents()
+                time.sleep(.01)
+            v.panel_catalogo._confirmar()
+            limite = time.monotonic() + 3
+            while v.panel_catalogo.ocupada and time.monotonic() < limite:
+                app.processEvents()
+                time.sleep(.01)
+        assert g.operaciones_categorias() == []
+        v.close()
+
+
+def test_panel_importar_y_completar_variables_dialogo(app, tmp_path):
+    from unittest.mock import patch
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QLineEdit, QMessageBox
+    from openpyxl import Workbook
+    from fraseya.presentacion.qt_dialogos import completar_variables
+
+    ruta_xlsx = tmp_path / 'frases.xlsx'
+    wb = Workbook()
+    ws = wb.active
+    ws.append(['categoria', 'titulo', 'abreviatura', 'contenido'])
+    ws.append(['General', 'Saludo Excel', '!excel', 'Hola {nombre}'])
+    wb.save(ruta_xlsx)
+
+    with RepositorioSQLite(':memory:') as repo:
+        g = GestionFrases(repo)
+        v = VentanaQt(g, demostracion=False, autenticacion=Mock(), sesion=Sesion('uno@example.test', 'usuario', 'token'))
+        v.importar_excel()
+        with patch('fraseya.presentacion.qt_paneles.QFileDialog.getOpenFileName', return_value=(str(ruta_xlsx), '')):
+            v.panel_importar.examinar()
+        assert v.panel_importar.ruta.text() == str(ruta_xlsx)
+        v.panel_importar.ejecutar()
+        assert any(f['abreviatura'] == '!excel' for f in g.listar())
+        v.close()
+
+    def responder_dialogo():
+        from PySide6.QtWidgets import QDialogButtonBox
+        dlgs = [w for w in app.topLevelWidgets() if isinstance(w, QDialog) and w.isVisible()]
+        if not dlgs:
+            QTimer.singleShot(20, responder_dialogo)
+            return
+        d = dlgs[-1]
+        campos = d.findChildren(QLineEdit)
+        caja = d.findChild(QDialogButtonBox)
+        campos[0].setText('')
+        caja.accepted.emit()
+        for ed in campos:
+            ed.setText('Camila')
+        caja.accepted.emit()
+
+    with patch.object(QMessageBox, 'warning') as warn_mock:
+        QTimer.singleShot(30, responder_dialogo)
+        resultado = completar_variables(None, 'Hola {nombre}', ['nombre'], {'nombre': ''}, flotante=True)
+        assert resultado == {'nombre': 'Camila'}
+        warn_mock.assert_called_once()
+
+
+def test_expansion_buscador_ordena_favoritas_y_sin_tildes(app):
+    from unittest.mock import patch
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QLineEdit, QListWidget
+    from fraseya.presentacion.qt_expansion import ExpansionQt
+
+    with RepositorioSQLite(':memory:') as repo:
+        g = GestionFrases(repo)
+        cat = g.categorias_propias()[0]['id']
+        uno = g.crear('Información normal', '!info', 'Detalle normal', cat)
+        dos = g.crear('Información prioritaria', '!prio', 'Detalle urgente', cat)
+        g.alternar_favorita(dos)
+        v = VentanaQt(g, demostracion=True)
+        with patch('fraseya.presentacion.qt_expansion.TecladoGlobal'), \
+             patch('fraseya.presentacion.qt_expansion.EscritorTexto'), \
+             patch('fraseya.presentacion.qt_expansion.forzar_primer_plano'), \
+             patch('fraseya.presentacion.qt_expansion.activar_ventana'):
+            exp = ExpansionQt(v, repo)
+            observado = {}
+
+            def filtrar_y_cerrar():
+                dlgs = [w for w in app.topLevelWidgets() if isinstance(w, QDialog) and w.isVisible()]
+                if not dlgs:
+                    QTimer.singleShot(20, filtrar_y_cerrar)
+                    return
+                d = dlgs[-1]
+                d.findChild(QLineEdit).setText('informacion')
+                app.processEvents()
+                lista = d.findChild(QListWidget)
+                observado['items'] = [lista.item(i).text() for i in range(lista.count())]
+                d.reject()
+
+            QTimer.singleShot(30, filtrar_y_cerrar)
+            exp.buscador(12345)
+            assert len(observado['items']) == 2
+            assert observado['items'][0].startswith('[★] Información prioritaria')
+            assert uno != dos
+            exp.detener()
+        v.close()

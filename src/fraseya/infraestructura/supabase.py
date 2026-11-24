@@ -170,28 +170,33 @@ class ClienteSupabase:
 class AutenticacionSupabase:
     def __init__(self, cliente):
         self.cliente = cliente
+        self._lock = RLock()
         self._sesion = None
         self._cerrada = False
 
     def iniciar_sesion(self, nombre, clave):
-        if self._cerrada:
-            raise ErrorSupabase('La ventana de acceso se cerró.')
-        self._sesion = None
+        with self._lock:
+            if self._cerrada:
+                raise ErrorSupabase('La ventana de acceso se cerró.')
+            self._sesion = None
         perfil = self.cliente.entrar(nombre, clave)
-        if self._cerrada:
-            self.cliente.limpiar()
-            raise ErrorSupabase('La ventana de acceso se cerró.')
-        self._sesion = Sesion(perfil['correo'], perfil['rol'], secrets.token_urlsafe(32))
-        return self._sesion
+        with self._lock:
+            if self._cerrada:
+                self.cliente.limpiar()
+                raise ErrorSupabase('La ventana de acceso se cerró.')
+            self._sesion = Sesion(perfil['correo'], perfil['rol'], secrets.token_urlsafe(32))
+            return self._sesion
 
     def sin_conexion(self):
-        self.cliente.limpiar()
-        self._sesion = Sesion('Modo sin conexión', 'usuario', 'offline')
-        return self._sesion
+        with self._lock:
+            self.cliente.limpiar()
+            self._sesion = Sesion('Modo sin conexión', 'usuario', 'offline')
+            return self._sesion
 
     def validar(self, sesion, administrador=False):
-        if sesion is None or sesion != self._sesion:
-            raise PermissionError('Inicia sesión para continuar.')
+        with self._lock:
+            if sesion is None or sesion != self._sesion:
+                raise PermissionError('Inicia sesión para continuar.')
         if administrador:
             if sesion.token == 'offline' or self.cliente.perfil()['rol'] != 'administrador':
                 raise PermissionError('Solo el administrador puede publicar o eliminar del catálogo.')
@@ -203,13 +208,15 @@ class AutenticacionSupabase:
         except ErrorSupabase:
             pass
         finally:
-            self._sesion = None
-            self.cliente.limpiar()
+            with self._lock:
+                self._sesion = None
+                self.cliente.limpiar()
 
     def cerrar(self):
-        self._cerrada = True
-        self._sesion = None
-        self.cliente.limpiar()
+        with self._lock:
+            self._cerrada = True
+            self._sesion = None
+            self.cliente.limpiar()
 
 
 class RepositorioSupabase:

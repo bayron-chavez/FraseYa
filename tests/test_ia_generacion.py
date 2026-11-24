@@ -53,3 +53,18 @@ def test_generacion_funciona_con_catalogo_vacio():
         'frases': [],
         'modo': 'generar',
     }
+
+
+@pytest.mark.parametrize('estado,esperado', [
+    (404, 'Falta activar el servicio de IA'),
+    (429, 'límite'),
+    (502, 'no pudo responder'),
+    (503, 'aún no está configurada'),
+])
+def test_generar_traduce_errores_http(estado, esperado):
+    from fraseya.infraestructura.supabase import ErrorSupabase
+    cliente = Mock()
+    cliente.solicitar.side_effect = ErrorSupabase('fallo remoto', estado)
+    servicio = RecomendadorIA(cliente)
+    with pytest.raises(ValueError, match=esperado):
+        servicio.generar('Consulta de cliente', [])

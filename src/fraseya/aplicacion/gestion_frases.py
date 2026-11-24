@@ -1,7 +1,15 @@
 """Casos de uso de RF-04: gestionar frases propias (compartidas son de solo lectura)."""
-import sqlite3
-import re
 import json
+import sqlite3
+
+from fraseya.dominio.reglas import (
+    COLOR_DEFECTO,
+    COMPARTIDA,
+    PROPIA,
+    validar_color_hex,
+    validar_datos_frase,
+    validar_nombre_categoria,
+)
 
 CATALOGO_PROPIO = 'Mis frases'
 CATEGORIA_PREDETERMINADA = 'General'
@@ -56,7 +64,7 @@ class GestionFrases:
         categorias = self.categorias_propias()
         categoria_id = frase['categoria_id']
         if categoria_id not in {c['id'] for c in categorias}:
-            categoria_id = next((c['id'] for c in categorias if c['nombre'] == 'General'), categorias[0]['id'])
+            categoria_id = next((c['id'] for c in categorias if c['nombre'] == CATEGORIA_PREDETERMINADA), categorias[0]['id'])
         # La validación rechaza conflictos nuevos; conserva la copia para reintentar.
         ident = self.crear(frase['titulo'], frase['abreviatura'], frase['contenido'], categoria_id)
         if era_favorita:
@@ -67,10 +75,10 @@ class GestionFrases:
         return ident
 
     def _catalogo_propio(self):
-        existentes = self.repo.listar_catalogos('propia')
+        existentes = self.repo.listar_catalogos(PROPIA)
         if existentes:
             return existentes[0]['id']
-        return self.repo.crear_catalogo(CATALOGO_PROPIO, 'propia')
+        return self.repo.crear_catalogo(CATALOGO_PROPIO, PROPIA)
 
     def categorias_propias(self):
         """Categorías donde pueden guardarse frases propias; crea 'General' si no hay ninguna."""
@@ -80,7 +88,7 @@ class GestionFrases:
             self.repo.crear_categoria(catalogo_id, CATEGORIA_PREDETERMINADA)
             categorias = self.repo.listar_categorias(catalogo_id)
         nombres = {c['nombre'].casefold() for c in categorias}
-        compartidos = {c['id'] for c in self.repo.listar_catalogos('compartida')}
+        compartidos = {c['id'] for c in self.repo.listar_catalogos(COMPARTIDA)}
         pendientes = {o['anterior'].casefold() for o in self.operaciones_categorias()}
         remotas = [c for c in self.repo.listar_categorias() if c['catalogo_id'] in compartidos]
         espejos = json.loads(self.repo.leer_configuracion('categorias_espejo', '{}'))
@@ -107,25 +115,25 @@ class GestionFrases:
                 espejos[str(ident)] = categoria['nombre'].casefold()
                 nombres.add(categoria['nombre'].casefold())
         self.repo.guardar_configuracion('categorias_espejo', json.dumps(espejos))
-        categorias = self.repo.listar_categorias(catalogo_id)
-        return categorias
+        return self.repo.listar_categorias(catalogo_id)
 
-    def crear_categoria(self, nombre, autenticacion, sesion, color='#64748B'):
+    def crear_categoria(self, nombre, autenticacion, sesion, color=COLOR_DEFECTO):
         """Crea una categoría del administrador para la próxima publicación."""
         if autenticacion is None or sesion is None:
             raise PermissionError('Inicia sesión como administrador para crear categorías.')
         autenticacion.validar(sesion, administrador=True)
-        nombre = (nombre or '').strip()
-        if not nombre or len(nombre) > 200:
-            raise ValueError('El nombre debe tener entre 1 y 200 caracteres.')
-        if not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
-            raise ValueError('El color debe tener formato #RRGGBB.')
+        nombre = validar_nombre_categoria(nombre)
+        validar_color_hex(color)
         if any(c['nombre'].casefold() == nombre.casefold() for c in self.categorias_propias()):
             raise ValueError('Ya existe una categoría con ese nombre.')
         return self.repo.crear_categoria(self._catalogo_propio(), nombre, color)
 
     def operaciones_categorias(self):
         return json.loads(self.repo.leer_configuracion('operaciones_categorias', '[]'))
+
+    def limpiar_operaciones_categorias(self):
+        """Descarta operaciones de categoría ya consumidas en una publicación exitosa."""
+        self.repo.guardar_configuracion('operaciones_categorias', '[]')
 
     def editar_categoria(self, ident, nombre, color, autenticacion, sesion, eliminar=False):
         if autenticacion is None or sesion is None:
@@ -135,13 +143,16 @@ class GestionFrases:
         actual = next((c for c in categorias if c['id'] == ident), None)
         if actual is None:
             raise ValueError('Selecciona una categoría del editor.')
-        nombre = (nombre or '').strip()
         if not eliminar:
-            if not nombre or len(nombre) > 200 or not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
-                raise ValueError('Indica un nombre de 1 a 200 caracteres y un color válido.')
+            try:
+                nombre = validar_nombre_categoria(nombre)
+                validar_color_hex(color)
+            except ValueError as err:
+                raise ValueError('Indica un nombre de 1 a 200 caracteres y un color válido.') from err
             if any(c['id'] != ident and c['nombre'].casefold() == nombre.casefold() for c in categorias):
                 raise ValueError('Ya existe una categoría con ese nombre.')
         else:
+            nombre = (nombre or '').strip()
             if actual['nombre'].casefold() == 'general':
                 raise ValueError('La categoría General se conserva como categoría predeterminada.')
             ids = {c['id'] for c in self.repo.listar_categorias()
@@ -155,8 +166,10 @@ class GestionFrases:
                 self.repo.db.execute('DELETE FROM CATEGORIA WHERE id=?', (ident,))
             else:
                 self.repo.db.execute('UPDATE CATEGORIA SET nombre=?,color=? WHERE id=?', (nombre, color, ident))
-            self.repo.db.execute('INSERT INTO CONFIGURACION(clave,valor) VALUES(?,?) ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor',
-                ('operaciones_categorias', json.dumps(operaciones)))
+            self.repo.db.execute(
+                'INSERT INTO CONFIGURACION(clave,valor) VALUES(?,?) ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor',
+                ('operaciones_categorias', json.dumps(operaciones)),
+            )
 
     def listar(self, texto='', categoria_id=None):
         """Todas las frases (propias y compartidas) con el nombre y color de su categoría."""
@@ -167,7 +180,7 @@ class GestionFrases:
         for f in self.repo.listar_frases(categoria_id=categoria_id):
             cat = categorias.get(f['categoria_id'], {})
             f['categoria'] = cat.get('nombre', '')
-            f['color'] = cat.get('color', '#64748B')
+            f['color'] = cat.get('color', COLOR_DEFECTO)
             f['favorita'] = self._clave_favorita(f) in favoritas
             if clave and clave not in ' '.join((f['titulo'], f['abreviatura'], f['categoria'],
                                                 f['contenido'])).lower():
@@ -175,27 +188,19 @@ class GestionFrases:
             resultado.append(f)
         return sorted(resultado, key=lambda f: not f['favorita'])
 
-    def _errores_abreviatura(self, abreviatura, ignorar_id=None):
-        abreviatura = (abreviatura or '').strip()
-        if not abreviatura:
-            return ['La abreviatura no puede estar vacía.']
-        if any(c.isspace() for c in abreviatura):
-            return ['La abreviatura no puede contener espacios.']
+    def _errores_abreviatura_unica(self, abreviatura, ignorar_id=None):
+        limpia = (abreviatura or '').strip()
+        if not limpia or any(c.isspace() for c in limpia):
+            return []
         for f in self.repo.listar_frases():
-            if f['id'] != ignorar_id and f['abreviatura'].lower() == abreviatura.lower():
-                return [f'La abreviatura "{abreviatura}" ya está en uso.']
+            if f['id'] != ignorar_id and f['abreviatura'].lower() == limpia.lower():
+                return [f'La abreviatura "{limpia}" ya está en uso.']
         return []
 
     def validar(self, titulo, abreviatura, contenido, categoria_id, ignorar_id=None):
         """Lanza ErroresValidacion con todos los campos incorrectos, no solo el primero."""
-        errores = []
-        if not (titulo or '').strip():
-            errores.append('El título no puede estar vacío.')
-        if len(titulo or '') > 500 or len(abreviatura or '') > 100 or len(contenido or '') > 100000:
-            errores.append('Máximos: título 500, abreviatura 100 y contenido 100000 caracteres.')
-        errores += self._errores_abreviatura(abreviatura, ignorar_id)
-        if not (contenido or '').strip():
-            errores.append('El contenido no puede estar vacío.')
+        errores = validar_datos_frase(titulo, abreviatura, contenido)
+        errores += self._errores_abreviatura_unica(abreviatura, ignorar_id)
         if categoria_id not in {c['id'] for c in self.categorias_propias()}:
             errores.append('Elige una categoría propia.')
         if errores:
@@ -203,7 +208,7 @@ class GestionFrases:
 
     def _propia(self, ident):
         frase = self.repo.obtener_frase(ident)
-        if frase['origen'] != 'propia':
+        if frase['origen'] != PROPIA:
             raise PermissionError('Las frases compartidas son de solo lectura; duplícala para editarla.')
         return frase
 
@@ -227,7 +232,7 @@ class GestionFrases:
         original = self.repo.obtener_frase(ident)
         abreviatura = abreviatura or self._abreviatura_libre(original['abreviatura'])
         categoria_id = self.categorias_propias()[0]['id']
-        if original['origen'] == 'propia':
+        if original['origen'] == PROPIA:
             categoria_id = original['categoria_id']
         return self.crear(original['titulo'] + ' (copia)', abreviatura, original['contenido'], categoria_id)
 

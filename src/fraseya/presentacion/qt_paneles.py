@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QFrame, QSplitter, QScrollArea, QFileDialog,
 )
 from fraseya.aplicacion.resolver_variables import detectar, sustituir, valores_iniciales, faltantes
+from fraseya.infraestructura.escritor_texto import VELOCIDAD_MAX_MS, VELOCIDAD_MIN_MS
 from .qt_temas import ESTILO, ESTILO_OSCURO, hoja_estilo, paleta
 
 PALETA_CATEGORIAS = [
@@ -553,7 +554,7 @@ class PanelAjustes(QWidget):
         form.addRow(QLabel('Buscador rápido'), self.atajo)
 
         self.velocidad = QSpinBox()
-        self.velocidad.setRange(0, 1000)
+        self.velocidad.setRange(VELOCIDAD_MIN_MS, VELOCIDAD_MAX_MS)
         form.addRow(QLabel('Velocidad de escritura (ms)'), self.velocidad)
 
         self.intervalo = QSpinBox()
@@ -1113,6 +1114,7 @@ class PanelCatalogo(QWidget):
                 self.aviso.setText(str(error))
                 return
             self._vista_previa = None
+            self.gestion.limpiar_operaciones_categorias()
             self.resumen_version.setText(f'Publicado correctamente · Versión {resultado.version}')
             self.aviso.setText('El catálogo compartido se actualizó y se iniciará la sincronización.')
             if self._al_publicado:
@@ -1182,15 +1184,69 @@ class PanelUsuarios(QWidget):
         self.aviso.setText('Nombre de tabla copiado al portapapeles.')
 
 
+class FormularioVariablesQt:
+    """Constructor reutilizable de campos y vista previa en vivo para variables de una frase."""
+
+    def __init__(self, scroll: QScrollArea, preview: QTextEdit, *, al_confirmar=None):
+        self._scroll = scroll
+        self._preview = preview
+        self._al_confirmar = al_confirmar
+        self.contenido = ''
+        self.nombres = []
+        self.entradas = {}
+
+    def cargar(self, contenido, nombres=None, iniciales=None):
+        self.contenido = contenido
+        self.nombres = list(nombres) if nombres is not None else detectar(contenido)
+        valores_ini = iniciales if iniciales is not None else valores_iniciales(self.nombres)
+        cuerpo = QWidget()
+        cuerpo.setObjectName('scroll_content')
+        form = QFormLayout(cuerpo)
+        form.setContentsMargins(0, 0, 8, 0)
+        form.setSpacing(12)
+        self.entradas = {}
+        primera = None
+        for n in self.nombres:
+            entrada = QLineEdit(valores_ini.get(n, ''))
+            entrada.textChanged.connect(self.actualizar_preview)
+            if self._al_confirmar is not None:
+                entrada.returnPressed.connect(self._al_confirmar)
+            self.entradas[n] = entrada
+            form.addRow(QLabel(n.replace('_', ' ').capitalize()), entrada)
+            if primera is None:
+                primera = entrada
+        self._scroll.setWidget(cuerpo)
+        self.actualizar_preview()
+        if primera is not None:
+            primera.setFocus()
+
+    def valores_crudos(self):
+        return {n: e.text() for n, e in self.entradas.items()}
+
+    def valores_limpios(self):
+        return {n: e.text().strip() for n, e in self.entradas.items()}
+
+    def campos_faltantes(self):
+        return faltantes(self.nombres, self.valores_limpios())
+
+    def actualizar_preview(self):
+        valores = self.valores_crudos()
+        self._preview.setPlainText(sustituir(self.contenido, valores))
+        foco = self._scroll.focusWidget()
+        for n, e in self.entradas.items():
+            if e is foco:
+                cursor = self._preview.document().find(e.text() or '{' + n + '}')
+                if not cursor.isNull():
+                    self._preview.setTextCursor(cursor)
+                break
+
+
 class PanelVariables(QWidget):
     """Panel integrado para completar variables de una frase y copiar la respuesta."""
     def __init__(self, *, al_copiar=None, al_cancelar=None, parent=None):
         super().__init__(parent)
         self._al_copiar = al_copiar
         self._al_cancelar = al_cancelar
-        self._contenido = ''
-        self._nombres = []
-        self.entradas = {}
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(0, 0, 0, 0)
@@ -1247,49 +1303,22 @@ class PanelVariables(QWidget):
         divisor.setSizes([430, 520])
         raiz.addWidget(divisor, 1)
 
+        self._formulario = FormularioVariablesQt(self._scroll, self.preview, al_confirmar=self.confirmar)
+
+    @property
+    def entradas(self):
+        return self._formulario.entradas
+
     def cargar(self, contenido, titulo=''):
-        self._contenido = contenido
-        self._nombres = detectar(contenido)
-        iniciales = valores_iniciales(self._nombres)
         self.subtitulo.setText(f'Frase: {titulo}' if titulo else 'Completa las variables y revisa la vista previa.')
         self.aviso.setText('')
-        cuerpo = QWidget()
-        cuerpo.setObjectName('scroll_content')
-        form = QFormLayout(cuerpo)
-        form.setContentsMargins(0, 0, 8, 0)
-        form.setSpacing(12)
-        self.entradas = {}
-        primera = None
-        for n in self._nombres:
-            entrada = QLineEdit(iniciales.get(n, ''))
-            entrada.textChanged.connect(self._actualizar)
-            entrada.returnPressed.connect(self.confirmar)
-            self.entradas[n] = entrada
-            form.addRow(QLabel(n.replace('_', ' ').capitalize()), entrada)
-            if primera is None:
-                primera = entrada
-        self._scroll.setWidget(cuerpo)
-        self._actualizar()
-        if primera is not None:
-            primera.setFocus()
-
-    def _actualizar(self):
-        valores = {n: e.text() for n, e in self.entradas.items()}
-        self.preview.setPlainText(sustituir(self._contenido, valores))
-        foco = self.focusWidget()
-        for n, e in self.entradas.items():
-            if e is foco:
-                cursor = self.preview.document().find(e.text() or '{' + n + '}')
-                if not cursor.isNull():
-                    self.preview.setTextCursor(cursor)
-                break
+        self._formulario.cargar(contenido)
 
     def confirmar(self):
-        valores = {n: e.text().strip() for n, e in self.entradas.items()}
-        if faltantes(self._nombres, valores):
+        if self._formulario.campos_faltantes():
             self.aviso.setText('Complete todos los campos antes de copiar.')
             return False
-        texto = sustituir(self._contenido, valores)
+        texto = sustituir(self._formulario.contenido, self._formulario.valores_limpios())
         QApplication.clipboard().setText(texto)
         if self._al_copiar:
             self._al_copiar(texto)

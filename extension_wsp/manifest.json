@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "FraseYa · Lector WhatsApp Web",
   "version": "1.0.0",
-  "description": "Envía en memoria el último mensaje entrante de WhatsApp Web a FraseYa local (127.0.0.1:47821) para sugerir respuestas aprobadas sin envío automático.",
+  "description": "Lee exclusivamente en memoria los turnos recientes del chat abierto en WhatsApp Web y los envía a FraseYa local (127.0.0.1:47821) para sugerir respuestas aprobadas sin envío automático.",
   "host_permissions": [
     "http://127.0.0.1:47821/*"
   ],

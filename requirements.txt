@@ -1,10 +1,8 @@
-# Dependencias previstas en la tarjeta Setup. SQLite y Tkinter vienen con Python.
+# Dependencias principales de FraseYa (Python 3.12+ / PySide6).
 # Se elige pynput como alternativa a keyboard; no se requieren ambas.
 pynput>=1.7,<2
-customtkinter>=5.2,<6
 Pillow>=12.3,<13
 PySide6==6.12.0
-pystray>=0.19.5,<0.20
 openpyxl>=3.1,<4
 defusedxml>=0.7.1,<0.8
 pytest>=8,<10

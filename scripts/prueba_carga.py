@@ -1,4 +1,4 @@
-"""Prueba de carga de la ventana principal con muchas frases.
+"""Prueba de carga de la ventana principal Qt con muchas frases.
 
 Usa una base temporal (no toca datos/fraseya.db). Mide cuánto tarda en cargar
 la lista y en filtrar con el buscador. Con --ventana la deja abierta para
@@ -8,6 +8,7 @@ probarla a mano.
     python scripts/prueba_carga.py --ventana  # mide y abre la ventana
 """
 import argparse
+import os
 import sys
 import tempfile
 import time
@@ -15,9 +16,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
+from PySide6.QtWidgets import QApplication
 from fraseya.aplicacion.gestion_frases import GestionFrases
 from fraseya.infraestructura import RepositorioSQLite
-from fraseya.presentacion.ventana_principal import VentanaPrincipal
+from fraseya.presentacion.qt_vista import VentanaQt
 
 TEMAS = ['Saludo', 'Despedida', 'Solicitud', 'Confirmación', 'Aviso', 'Reclamo', 'Plazo', 'Pago']
 
@@ -44,26 +46,30 @@ def main():
     parser.add_argument('--ventana', action='store_true')
     parser.add_argument('--frases', type=int, default=200)
     args = parser.parse_args()
+    if not args.ventana:
+        os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    app = QApplication.instance() or QApplication([])
     with tempfile.TemporaryDirectory() as carpeta:
         with RepositorioSQLite(Path(carpeta) / 'prueba.db') as repo:
             gestion = GestionFrases(repo)
             mitad = args.frases // 2
             medir(f'Crear {args.frases} frases', lambda: poblar(gestion, mitad, args.frases - mitad))
             inicio = time.perf_counter()
-            ventana = VentanaPrincipal(gestion)
+            ventana = VentanaQt(gestion, demostracion=True)
             print(f'Abrir ventana con {args.frases} frases: {(time.perf_counter() - inicio) * 1000:.0f} ms')
             medir('Recargar la lista', ventana.refrescar)
             for texto in ('p1', 'norma', 'caso 150', 'zzz'):
-                ventana.busqueda.delete(0, 'end')
-                ventana.busqueda.insert(0, texto)
+                ventana.busqueda.setText(texto)
                 medir(f'Buscar "{texto}"', ventana.refrescar)
-            ventana.busqueda.delete(0, 'end')
+            ventana.busqueda.setText('')
             ventana.refrescar()
             if args.ventana:
                 print('Ventana abierta con datos de prueba. Ciérrala para terminar.')
-                ventana.mainloop()
+                ventana.show()
+                app.exec()
             else:
-                ventana.destroy()
+                ventana.close()
+                app.processEvents()
 
 
 if __name__ == '__main__':

@@ -62,6 +62,8 @@ def test_editar_color_renombrar_y_eliminar_categoria_vacia():
         gestion.editar_categoria(ident, '', '#123456', auth, sesion, eliminar=True)
         assert not any(c['nombre'] in ('Ventas', 'Comercial') for c in gestion.categorias_propias())
         assert len(gestion.operaciones_categorias()) == 2
+        gestion.limpiar_operaciones_categorias()
+        assert gestion.operaciones_categorias() == []
 
 
 def test_no_elimina_categoria_ocupada_o_usuario_no_autorizado():

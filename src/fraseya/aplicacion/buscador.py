@@ -4,17 +4,20 @@ Sin acentos ni mayúsculas ("dia" encuentra "Día"). Cada palabra de la consulta
 debe aparecer en algún campo; las coincidencias en la abreviatura y el título
 van primero.
 """
-import unicodedata
+from fraseya.dominio.reglas import normalizar_texto
 
 # Menor es mejor: dónde y cómo coincide cada palabra de la consulta.
-_PESO = {'abrev_exacta': 0, 'abrev_inicio': 1, 'abrev': 2, 'titulo_inicio': 3, 'titulo': 4,
-         'categoria': 5, 'contenido': 6}
+_PESO = {
+    'abrev_exacta': 0,
+    'abrev_inicio': 1,
+    'abrev': 2,
+    'titulo_inicio': 3,
+    'titulo': 4,
+    'categoria': 5,
+    'contenido': 6,
+}
 
-
-def normalizar(texto):
-    """Minúsculas y sin acentos, para comparar."""
-    base = unicodedata.normalize('NFD', (texto or '').casefold())
-    return ''.join(c for c in base if not unicodedata.combining(c))
+normalizar = normalizar_texto
 
 
 def _mejor_peso(palabra, campos):
@@ -42,8 +45,12 @@ def buscar(frases, consulta, limite=100):
     completa = ' '.join(palabras)
     resultado = []
     for frase in frases:
-        campos = (normalizar(frase.get('abreviatura')), normalizar(frase.get('titulo')),
-                  normalizar(frase.get('categoria')), normalizar(frase.get('contenido')))
+        campos = (
+            normalizar(frase.get('abreviatura')),
+            normalizar(frase.get('titulo')),
+            normalizar(frase.get('categoria')),
+            normalizar(frase.get('contenido')),
+        )
         pesos = [_mejor_peso(p, campos) for p in palabras]
         if any(p is None for p in pesos):
             continue

@@ -6,6 +6,14 @@ import hmac
 import json
 import re
 
+from fraseya.dominio.reglas import (
+    MAX_ABREVIATURA,
+    MAX_CONTENIDO_FRASE,
+    MAX_NOMBRE_CATEGORIA,
+    MAX_TITULO_FRASE,
+    PATRON_COLOR_HEX,
+)
+
 FORMATO = 1
 MAX_BYTES = 5 * 1024 * 1024
 
@@ -64,12 +72,14 @@ def _categorias(categorias, errores):
         if _texto(nombre, ruta + '.nombre', errores):
             if nombre != nombre.strip():
                 errores.append(ruta + '.nombre: no debe tener espacios en los extremos.')
+            if len(nombre) > MAX_NOMBRE_CATEGORIA:
+                errores.append(f'{ruta}.nombre: supera {MAX_NOMBRE_CATEGORIA} caracteres.')
             normalizado = nombre.strip().casefold()
             if normalizado in nombres:
                 errores.append(ruta + '.nombre: categoría repetida.')
             nombres.add(normalizado)
         color = categoria.get('color')
-        if not isinstance(color, str) or not re.fullmatch(r'#[0-9A-Fa-f]{6}', color):
+        if not isinstance(color, str) or not PATRON_COLOR_HEX.fullmatch(color):
             errores.append(ruta + '.color: debe tener formato #RRGGBB.')
         frases = categoria.get('frases')
         if not isinstance(frases, list):
@@ -79,10 +89,13 @@ def _categorias(categorias, errores):
             lugar = f'{ruta}.frases[{j}]'
             if not _claves(frase, ('titulo', 'abreviatura', 'contenido'), lugar, errores):
                 continue
-            for clave in ('titulo', 'contenido'):
-                _texto(frase.get(clave), lugar + '.' + clave, errores)
+            for clave, limite in (('titulo', MAX_TITULO_FRASE), ('contenido', MAX_CONTENIDO_FRASE)):
+                if _texto(frase.get(clave), lugar + '.' + clave, errores) and len(frase[clave]) > limite:
+                    errores.append(f'{lugar}.{clave}: supera {limite} caracteres.')
             abreviatura = frase.get('abreviatura')
             if _texto(abreviatura, lugar + '.abreviatura', errores):
+                if len(abreviatura) > MAX_ABREVIATURA:
+                    errores.append(f'{lugar}.abreviatura: supera {MAX_ABREVIATURA} caracteres.')
                 if any(c.isspace() for c in abreviatura):
                     errores.append(lugar + '.abreviatura: no debe contener espacios.')
                 normalizada = abreviatura.casefold()

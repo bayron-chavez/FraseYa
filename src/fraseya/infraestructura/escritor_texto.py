@@ -1,14 +1,21 @@
 """EscritorTexto: escritura simulada en el campo de texto que tiene el foco.
 
-El teclado real se aísla en un backend para poder probar la lógica sin
-escribir en ventanas. Los saltos de línea se envían como Shift+Enter: un Enter
-simple enviaría el mensaje en las aplicaciones de chat, y la pulsación de
-envío debe quedar siempre en manos de la persona (RNF-10).
+Los saltos de línea se envían como Shift+Enter: un Enter simple enviaría el mensaje
+en las aplicaciones de chat, y el envío queda siempre bajo control del usuario.
 """
 import ctypes
+from ctypes import wintypes
 import sys
 import time
-from ctypes import wintypes
+
+from .win32_com import (
+    _INPUT_KEYBOARD,
+    _KEYEVENTF_KEYUP,
+    _KEYEVENTF_UNICODE,
+    INPUT,
+    KEYBDINPUT,
+    user32,
+)
 
 VELOCIDAD_MIN_MS = 10
 VELOCIDAD_MAX_MS = 60
@@ -17,43 +24,22 @@ ESPACIOS_POR_TABULADOR = 4
 
 
 class TecladoWindows:
-    """Backend que usa SendInput con eventos Unicode (sin pynput)."""
+    """Backend que usa SendInput con eventos Unicode y portapapeles con restauración."""
 
-    _KEYEVENTF_KEYUP = 0x0002
-    _KEYEVENTF_UNICODE = 0x0004
-    _INPUT_KEYBOARD = 1
+    _INPUT = INPUT
+    _KEYBDINPUT = KEYBDINPUT
+    _KEYEVENTF_KEYUP = _KEYEVENTF_KEYUP
+    _KEYEVENTF_UNICODE = _KEYEVENTF_UNICODE
+    _INPUT_KEYBOARD = _INPUT_KEYBOARD
     _VK_BACK, _VK_RETURN, _VK_SHIFT = 0x08, 0x0D, 0x10
     _VK_CONTROL, _VK_V = 0x11, 0x56
     _CF_UNICODETEXT = 13
     _GMEM_MOVEABLE = 0x0002
 
-    class _KEYBDINPUT(ctypes.Structure):
-        _fields_ = [('wVk', wintypes.WORD), ('wScan', wintypes.WORD),
-                    ('dwFlags', wintypes.DWORD), ('time', wintypes.DWORD),
-                    ('dwExtraInfo', ctypes.c_size_t)]
-
-    class _MOUSEINPUT(ctypes.Structure):  # fija el tamaño de la unión en 64 bits
-        _fields_ = [('dx', wintypes.LONG), ('dy', wintypes.LONG),
-                    ('mouseData', wintypes.DWORD), ('dwFlags', wintypes.DWORD),
-                    ('time', wintypes.DWORD), ('dwExtraInfo', ctypes.c_size_t)]
-
-    class _UNION(ctypes.Union):
-        pass
-
-    _UNION._fields_ = [('ki', _KEYBDINPUT), ('mi', _MOUSEINPUT)]
-
     def __init__(self):
         if sys.platform != 'win32':
             raise OSError('TecladoWindows solo funciona en Windows.')
-        class _INPUT(ctypes.Structure):
-            _fields_ = [('type', wintypes.DWORD), ('u', self._UNION)]
-
-        self._INPUT = _INPUT
-        self._user32 = ctypes.WinDLL('user32', use_last_error=True)
-        self._user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(_INPUT), ctypes.c_int]
-        self._user32.SendInput.restype = wintypes.UINT
-        self._user32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
-        self._user32.MapVirtualKeyW.restype = wintypes.UINT
+        self._user32 = user32()
 
     def _evento(self, vk=0, scan=0, flags=0):
         entrada = self._INPUT(type=self._INPUT_KEYBOARD)
@@ -69,20 +55,24 @@ class TecladoWindows:
         self._enviar(self._evento(vk), self._evento(vk, flags=self._KEYEVENTF_KEYUP))
 
     def caracter(self, c):
-        # Un carácter fuera del plano básico viaja como dos unidades UTF-16.
         datos = c.encode('utf-16-le')
         for i in range(0, len(datos), 2):
             unidad = int.from_bytes(datos[i:i + 2], 'little')
-            self._enviar(self._evento(scan=unidad, flags=self._KEYEVENTF_UNICODE),
-                         self._evento(scan=unidad, flags=self._KEYEVENTF_UNICODE | self._KEYEVENTF_KEYUP))
+            self._enviar(
+                self._evento(scan=unidad, flags=self._KEYEVENTF_UNICODE),
+                self._evento(scan=unidad, flags=self._KEYEVENTF_UNICODE | self._KEYEVENTF_KEYUP),
+            )
 
     def retroceso(self):
         self._tecla(self._VK_BACK)
 
     def salto_linea(self):
-        self._enviar(self._evento(self._VK_SHIFT), self._evento(self._VK_RETURN),
-                     self._evento(self._VK_RETURN, flags=self._KEYEVENTF_KEYUP),
-                     self._evento(self._VK_SHIFT, flags=self._KEYEVENTF_KEYUP))
+        self._enviar(
+            self._evento(self._VK_SHIFT),
+            self._evento(self._VK_RETURN),
+            self._evento(self._VK_RETURN, flags=self._KEYEVENTF_KEYUP),
+            self._evento(self._VK_SHIFT, flags=self._KEYEVENTF_KEYUP),
+        )
 
     def _apis_portapapeles(self):
         u = self._user32
@@ -93,6 +83,8 @@ class TecladoWindows:
         u.CloseClipboard.restype = wintypes.BOOL
         u.EmptyClipboard.argtypes = []
         u.EmptyClipboard.restype = wintypes.BOOL
+        u.GetClipboardData.argtypes = [wintypes.UINT]
+        u.GetClipboardData.restype = wintypes.HANDLE
         u.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
         u.SetClipboardData.restype = wintypes.HANDLE
         k.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
@@ -104,6 +96,25 @@ class TecladoWindows:
         k.GlobalFree.argtypes = [wintypes.HGLOBAL]
         k.GlobalFree.restype = wintypes.HGLOBAL
         return u, k
+
+    def _abrir_portapapeles(self, u) -> bool:
+        for _ in range(10):
+            if u.OpenClipboard(None):
+                return True
+            time.sleep(0.025)
+        return False
+
+    def _leer_portapapeles(self, u, k) -> str | None:
+        hmem = u.GetClipboardData(self._CF_UNICODETEXT)
+        if not hmem:
+            return None
+        ptr = k.GlobalLock(hmem)
+        if not ptr:
+            return None
+        try:
+            return ctypes.wstring_at(ptr)
+        finally:
+            k.GlobalUnlock(hmem)
 
     def _escribir_portapapeles(self, u, k, texto: str) -> bool:
         datos = (texto + '\0').encode('utf-16-le')
@@ -125,24 +136,20 @@ class TecladoWindows:
         return True
 
     def pegar_texto(self, texto: str) -> bool:
-        """Copia el texto al portapapeles y envía Ctrl+V con scan codes reales y pausas."""
+        """Copia el texto al portapapeles, envía Ctrl+V y restaura el texto previo."""
         if not texto:
             return True
         try:
             u, k = self._apis_portapapeles()
-        except Exception:
+        except OSError:
             return False
 
-        abierto = False
-        for _ in range(10):
-            if u.OpenClipboard(None):
-                abierto = True
-                break
-            time.sleep(0.025)
-        if not abierto:
+        if not self._abrir_portapapeles(u):
             return False
 
+        respaldo: str | None = None
         try:
+            respaldo = self._leer_portapapeles(u, k)
             escrito = self._escribir_portapapeles(u, k, texto.replace('\n', '\r\n'))
         finally:
             u.CloseClipboard()
@@ -150,16 +157,23 @@ class TecladoWindows:
         if not escrito:
             return False
 
-        scan_ctrl = u.MapVirtualKeyW(self._VK_CONTROL, 0)
-        scan_v = u.MapVirtualKeyW(self._VK_V, 0)
-        self._enviar(self._evento(self._VK_CONTROL, scan=scan_ctrl))
-        time.sleep(0.025)
-        self._enviar(self._evento(self._VK_V, scan=scan_v))
-        time.sleep(0.025)
-        self._enviar(self._evento(self._VK_V, scan=scan_v, flags=self._KEYEVENTF_KEYUP))
-        time.sleep(0.025)
-        self._enviar(self._evento(self._VK_CONTROL, scan=scan_ctrl, flags=self._KEYEVENTF_KEYUP))
-        time.sleep(0.05)
+        try:
+            scan_ctrl = u.MapVirtualKeyW(self._VK_CONTROL, 0)
+            scan_v = u.MapVirtualKeyW(self._VK_V, 0)
+            self._enviar(self._evento(self._VK_CONTROL, scan=scan_ctrl))
+            time.sleep(0.025)
+            self._enviar(self._evento(self._VK_V, scan=scan_v))
+            time.sleep(0.025)
+            self._enviar(self._evento(self._VK_V, scan=scan_v, flags=self._KEYEVENTF_KEYUP))
+            time.sleep(0.025)
+            self._enviar(self._evento(self._VK_CONTROL, scan=scan_ctrl, flags=self._KEYEVENTF_KEYUP))
+            time.sleep(0.08)
+        finally:
+            if respaldo is not None and self._abrir_portapapeles(u):
+                try:
+                    self._escribir_portapapeles(u, k, respaldo)
+                finally:
+                    u.CloseClipboard()
         return True
 
 
@@ -176,8 +190,10 @@ class EscritorTexto:
     @velocidad_ms.setter
     def velocidad_ms(self, valor):
         if type(valor) is not int or not VELOCIDAD_MIN_MS <= valor <= VELOCIDAD_MAX_MS:
-            raise ValueError(f'La velocidad debe ser un entero entre {VELOCIDAD_MIN_MS} y '
-                             f'{VELOCIDAD_MAX_MS} ms por carácter.')
+            raise ValueError(
+                f'La velocidad debe ser un entero entre {VELOCIDAD_MIN_MS} y '
+                f'{VELOCIDAD_MAX_MS} ms por carácter.'
+            )
         self._velocidad_ms = valor
 
     def borrar(self, cantidad):
@@ -189,14 +205,13 @@ class EscritorTexto:
             self._pausa(self._velocidad_ms / 1000)
 
     def escribir(self, texto):
-        # La tecla Tab mueve el foco en navegadores y chats (el resto del texto se
-        # perdería fuera del campo), así que un tabulador se escribe como espacios.
+        # Tab mueve el foco fuera del campo en navegadores y chats; se escribe como espacios.
         texto = texto.replace('\r\n', '\n').replace('\r', '\n').replace('\t', ' ' * ESPACIOS_POR_TABULADOR)
         if len(texto) >= 12 and hasattr(self.teclado, 'pegar_texto'):
             try:
                 if self.teclado.pegar_texto(texto):
                     return
-            except Exception:
+            except OSError:
                 pass
         for c in texto:
             if c == '\n':
@@ -206,6 +221,6 @@ class EscritorTexto:
             self._pausa(self._velocidad_ms / 1000)
 
     def reemplazar(self, caracteres_a_borrar, texto):
-        """Borra la abreviatura (y la tecla de confirmación, si se escribió) y escribe la frase."""
+        """Borra la abreviatura y escribe la frase."""
         self.borrar(caracteres_a_borrar)
         self.escribir(texto)

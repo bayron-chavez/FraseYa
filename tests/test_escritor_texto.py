@@ -110,3 +110,25 @@ def test_usa_pegar_texto_en_bloques_largos_y_hace_fallback_si_falla():
     e_fail.escribir('Texto con respaldo')
     assert t_fail.pegados == ['Texto con respaldo']
     assert ''.join(v for k, v in t_fail.eventos if k == 'c') == 'Texto con respaldo'
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Solo Windows')
+def test_teclado_windows_pegar_texto_restaura_portapapeles_previo(monkeypatch):
+    from unittest.mock import MagicMock
+    from fraseya.infraestructura.escritor_texto import TecladoWindows
+
+    t = TecladoWindows()
+    fake_u, fake_k = MagicMock(), MagicMock()
+    escritos = []
+    monkeypatch.setattr(t, '_apis_portapapeles', lambda: (fake_u, fake_k))
+    monkeypatch.setattr(t, '_abrir_portapapeles', lambda _u: True)
+    monkeypatch.setattr(t, '_leer_portapapeles', lambda _u, _k: 'Texto previo del usuario')
+    monkeypatch.setattr(t, '_escribir_portapapeles', lambda _u, _k, txt: (escritos.append(txt), True)[1])
+    monkeypatch.setattr(t, '_enviar', lambda *_args, **_kw: (_ for _ in ()).throw(OSError('SendInput bloqueado')))
+    monkeypatch.setattr('fraseya.infraestructura.escritor_texto.time.sleep', lambda *_: None)
+
+    with pytest.raises(OSError, match='SendInput bloqueado'):
+        t.pegar_texto('Respuesta\nNueva')
+    # Primero escribe el texto a pegar con CRLF, luego en finally restaura el texto previo
+    assert escritos == ['Respuesta\r\nNueva', 'Texto previo del usuario']
+    assert fake_u.CloseClipboard.call_count == 2

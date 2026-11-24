@@ -4,15 +4,12 @@ Si la frase no tiene marcadores, el formulario no se pide y la inserción es
 inmediata. Quien pide los valores (la ventana) se inyecta como función, para
 poder probar esta lógica sin interfaz.
 """
-import re
 from datetime import date
 
-_MARCADOR = re.compile(r'\{(\w+)\}')
+from fraseya.dominio.reglas import MARCADOR_VARIABLE, extraer_marcadores
 
-
-def detectar(contenido):
-    """Nombres de los marcadores, sin repetir y en el orden en que aparecen."""
-    return list(dict.fromkeys(_MARCADOR.findall(contenido)))
+_MARCADOR = MARCADOR_VARIABLE
+detectar = extraer_marcadores
 
 
 def valores_iniciales(nombres, hoy=None):

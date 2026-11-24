@@ -2,7 +2,9 @@
 
 FraseYa inserta textos predefinidos en el campo activo de Windows. Tus frases
 propias se guardan en este equipo; el catálogo compartido llega desde Supabase.
-La aplicación no envía mensajes en tu nombre ni lee conversaciones.
+La aplicación **nunca envía mensajes automáticamente**: el asistente en vivo
+opcional solo lee el chat activo en memoria cuando lo activas y tú decides si
+insertar, editar o descartar cada sugerencia.
 
 ## Iniciar
 
@@ -100,15 +102,16 @@ versión instalada, la última comprobación y el resultado. Si una abreviatura
 propia coincide con una compartida, renombra la propia: se rechaza la actualización
 completa y se conserva la versión anterior.
 
-«Trabajar sin conexión» abre la copia local y desactiva las peticiones periódicas.
-Puedes buscar, expandir y gestionar frases propias. No puedes publicar ni crear
-categorías de administrador sin validar el rol en el servidor. Esas operaciones
-centrales requieren conexión. Usa perfiles separados de Windows si compartes el
-equipo: la copia local no está cifrada ni separada por correo.
+«Trabajar sin conexión» abre la copia local del último perfil conectado en
+ese equipo (conservando tu catálogo sincronizado y tus frases propias) y desactiva
+las peticiones periódicas. Puedes buscar, expandir y gestionar frases propias. No
+puedes publicar ni crear categorías de administrador sin validar el rol en el servidor.
+Esas operaciones centrales requieren conexión. Usa perfiles separados de Windows si
+compartes el equipo: la copia local no está cifrada.
 
-La bandeja usa verde para catálogo comprobado, naranja al comprobar, rojo para
-error y gris para modo sin conexión. Su menú permite abrir la ventana,
-sincronizar o salir. Cerrar la ventana termina FraseYa y retira el icono.
+El icono en la bandeja del sistema permite abrir la ventana, sincronizar, ocultar la
+ventana o salir de FraseYa. El estado de sincronización y de conexión se muestra en la
+barra inferior y en la vista principal.
 
 ## Configuración y datos
 

@@ -1,7 +1,8 @@
 """Recomendaciones y plantillas propias generadas, sin envío automático."""
-import re
-import json
 from dataclasses import dataclass
+import json
+import re
+
 from fraseya.aplicacion.buscador import normalizar
 from fraseya.aplicacion.limite_acceso import LimiteAcceso
 from fraseya.infraestructura.supabase import ErrorSupabase
@@ -13,21 +14,39 @@ class Sugerencia:
     motivo: str
 
 
+def rankear_frases_relevantes(texto: str, frases: list[dict]) -> list[dict]:
+    """Ordena frases válidas por coincidencia léxica con `texto` y preferencia de favoritas."""
+    texto_busqueda = re.sub(r'(?im)^(?:cliente|agente)\s*:\s*', '', texto or '')
+    palabras = set(re.findall(r'\w{3,}', normalizar(texto_busqueda)))
+
+    def puntuacion(frase):
+        cuerpo = normalizar(' '.join(str(frase.get(c, '')) for c in ('titulo', 'categoria', 'contenido')))
+        coincidencias = len(palabras & set(re.findall(r'\w{3,}', cuerpo)))
+        return (-coincidencias, not frase.get('favorita', False), frase.get('id', 0))
+
+    validas = [
+        dict(f) for f in (frases or [])
+        if isinstance(f, dict) and isinstance(f.get('contenido'), str) and f['contenido'].strip()
+    ]
+    validas.sort(key=puntuacion)
+    return validas
+
+
 def preparar(mensaje, frases, permitir_vacio=False):
     if not isinstance(mensaje, str) or not mensaje.strip() or len(mensaje) > 4000:
         raise ValueError('Escribe un mensaje de entre 1 y 4.000 caracteres.')
-    texto_busqueda = re.sub(r'(?im)^(?:cliente|agente)\s*:\s*', '', mensaje)
-    palabras = set(re.findall(r'\w{3,}', normalizar(texto_busqueda)))
-    def puntuacion(frase):
-        texto = normalizar(' '.join(str(frase.get(c, '')) for c in ('titulo', 'categoria', 'contenido')))
-        coincidencias = len(palabras & set(re.findall(r'\w{3,}', texto)))
-        return (-coincidencias, not frase.get('favorita', False), frase['id'])
-    elegidas = sorted(frases, key=puntuacion)[:40]
+    elegidas = rankear_frases_relevantes(mensaje, frases)[:40]
     if not elegidas and not permitir_vacio:
         raise ValueError('Guarda o sincroniza algunas frases antes de pedir sugerencias.')
-    candidatas = [{'id': f['id'], 'titulo': f['titulo'][:200],
-                  'categoria': f.get('categoria', '')[:200], 'contenido': f['contenido'][:1600]}
-                 for f in elegidas]
+    candidatas = [
+        {
+            'id': f['id'],
+            'titulo': f['titulo'][:200],
+            'categoria': f.get('categoria', '')[:200],
+            'contenido': f['contenido'][:1600],
+        }
+        for f in elegidas
+    ]
     while len(json.dumps({'mensaje': mensaje.strip(), 'frases': candidatas}).encode('utf-8')) > 180000:
         candidatas.pop()
     ids = {f['id'] for f in candidatas}
@@ -35,29 +54,34 @@ def preparar(mensaje, frases, permitir_vacio=False):
 
 
 class RecomendadorIA:
+    _MENSAJES_HTTP = {
+        404: 'Falta activar el servicio de IA en Supabase.',
+        429: 'Llegaste al límite de recomendaciones. Espera y vuelve a intentar.',
+        503: 'La IA aún no está configurada o no está disponible.',
+        502: 'Gemini no pudo responder. Revisa su clave y cuota en el servidor.',
+    }
+
     def __init__(self, cliente):
         self.cliente = cliente
         self.limite = LimiteAcceso()
 
+    def _invocar(self, pedido):
+        self.limite.reservar()
+        try:
+            return self.cliente.solicitar('POST', '/functions/v1/fraseya-ia', pedido)
+        except ErrorSupabase as error:
+            raise ErrorSupabase(self._MENSAJES_HTTP.get(error.estado, str(error)), error.estado) from None
+
     def generar(self, mensaje, frases):
         pedido, _ = preparar(mensaje, frases, permitir_vacio=True)
         pedido['modo'] = 'generar'
-        self.limite.reservar()
-        respuesta = self.cliente.solicitar('POST', '/functions/v1/fraseya-ia', pedido)
+        respuesta = self._invocar(pedido)
         validar_generada(respuesta, {'General', *(f['categoria'] for f in pedido['frases'])})
         return respuesta
 
     def sugerir(self, mensaje, frases):
         pedido, candidatas = preparar(mensaje, frases)
-        self.limite.reservar()
-        try:
-            respuesta = self.cliente.solicitar('POST', '/functions/v1/fraseya-ia', pedido)
-        except ErrorSupabase as error:
-            mensajes = {404: 'Falta activar el servicio de IA en Supabase.',
-                        429: 'Llegaste al límite de recomendaciones. Espera y vuelve a intentar.',
-                        503: 'La IA aún no está configurada o no está disponible.',
-                        502: 'Gemini no pudo responder. Revisa su clave y cuota en el servidor.'}
-            raise ErrorSupabase(mensajes.get(error.estado, str(error)), error.estado) from None
+        respuesta = self._invocar(pedido)
         if not isinstance(respuesta, dict) or set(respuesta) != {'sugerencias'}:
             raise ValueError('La IA devolvió una respuesta inválida.')
         filas = respuesta['sugerencias']

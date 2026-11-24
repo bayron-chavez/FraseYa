@@ -122,12 +122,12 @@ class MotorExpansion:
             if callable(antes_de_escribir):
                 try:
                     foco_ok = antes_de_escribir()
-                    if foco_ok is False:
-                        error_final = 'sin_foco'
-                        return
-                    time.sleep(0.08)
                 except Exception:
-                    pass
+                    foco_ok = False
+                if foco_ok is False:
+                    error_final = 'sin_foco'
+                    return
+                time.sleep(0.08)
             self.escritor.reemplazar(borrar, texto)
             ok_final = True
         except Exception as error:

@@ -415,3 +415,67 @@ def test_cambio_de_usuario_en_misma_app_aisla_frases_locales_y_conserva_por_corr
     archivos_bd = list((tmp_path / 'usuarios').glob('*.db'))
     assert len(archivos_bd) == 2
     assert all('ana' not in a.name and 'beto' not in a.name for a in archivos_bd)
+
+
+def test_offline_abre_catalogo_del_ultimo_perfil_conectado(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    ruta = tmp_path / 'fraseya_offline_perfil.db'
+    (tmp_path / 'supabase.json').write_text('{}', encoding='utf8')
+
+    sesiones = [
+        Sesion('ana@empresa.test', 'usuario', 'tok-ana'),
+        Sesion('Offline', 'usuario', 'offline'),
+    ]
+    auth = Mock()
+    auth._sesion = None
+    auth.cliente.url = 'https://example.supabase.co'
+    auth.validar.side_effect = lambda s, **_kw: setattr(auth, '_sesion', s)
+    auth.salir.side_effect = lambda _s: setattr(auth, '_sesion', None)
+
+    turno = {'n': 0}
+    observado = {'titulos_por_turno': []}
+
+    def crear_acceso(_auth):
+        idx = turno['n']
+        turno['n'] += 1
+        acceso = Mock()
+        acceso.exec.return_value = QDialog.Accepted
+        acceso.sesion = sesiones[idx]
+
+        def actuar():
+            ventanas = [
+                w for w in app.topLevelWidgets()
+                if isinstance(w, VentanaQt) and w.isVisible() and not w._cerrando
+            ]
+            if not ventanas:
+                QTimer.singleShot(40, actuar)
+                return
+            v = ventanas[0]
+            observado['titulos_por_turno'].append([f['titulo'] for f in v.gestion.listar()])
+            if idx == 0:
+                cat_id = v.gestion.categorias_propias()[0]['id']
+                v.gestion.crear('Guardada online', '!on', 'Contenido sincronizado', cat_id)
+                v.gestion.repo.reemplazar_compartidas(1, 'admin', '2026-10-01', [{
+                    'nombre': 'Central',
+                    'frases': [{'titulo': 'Compartida Central', 'abreviatura': '!cen', 'contenido': 'Hola'}],
+                }])
+                v.cerrar_sesion()
+            else:
+                v.close()
+
+        QTimer.singleShot(60, actuar)
+        return acceso
+
+    servicio_sync_falso = Mock()
+    puente_falso = Mock()
+    puente_falso.iniciar.return_value = 47821
+
+    with patch('fraseya.presentacion.qt_aplicacion.cargar_cliente'), \
+         patch('fraseya.presentacion.qt_aplicacion.AutenticacionSupabase', return_value=auth), \
+         patch('fraseya.presentacion.qt_aplicacion.AccesoQt', side_effect=crear_acceso), \
+         patch('fraseya.presentacion.qt_aplicacion.ServicioSincronizacion', return_value=servicio_sync_falso), \
+         patch('fraseya.presentacion.qt_aplicacion.PuenteWhatsAppWeb', return_value=puente_falso):
+        abrir(ruta, con_teclado=False)
+
+    assert observado['titulos_por_turno'][0] == []
+    assert set(observado['titulos_por_turno'][1]) == {'Compartida Central', 'Guardada online'}

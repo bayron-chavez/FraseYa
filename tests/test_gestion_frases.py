@@ -134,4 +134,4 @@ def test_edicion_tambien_junta_los_errores(gestion):
     gestion.crear('B', 'b', 'y', categoria(gestion))
     with pytest.raises(ErroresValidacion) as e:
         gestion.editar(ident, '', 'B', '', categoria(gestion))
-    assert len(e.value.errores) == 3 and 'ya está en uso' in e.value.errores[1]
+    assert len(e.value.errores) == 3 and any('ya está en uso' in msg for msg in e.value.errores)

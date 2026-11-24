@@ -19,13 +19,16 @@ from fraseya.aplicacion.asistente_vivo import (
     extraer_texto_cliente,
 )
 from fraseya.aplicacion.recomendaciones_ia import Sugerencia
-from fraseya.infraestructura import lector_chat
+from fraseya.infraestructura import lector_chat, uia_whatsapp
 from fraseya.infraestructura.lector_chat import (
     MAX_CUERPO_PUENTE,
     ORIGEN_WHATSAPP_WEB,
     LectorChat,
     PuenteWhatsAppWeb,
     VentanaChat,
+    es_ventana_whatsapp,
+)
+from fraseya.infraestructura.uia_whatsapp import (
     _IID_IUIAUTOMATION_TEXT_PATTERN,
     _NodoUIA,
     _UIA_CTRL_EDIT,
@@ -38,7 +41,6 @@ from fraseya.infraestructura.lector_chat import (
     _extraer_ultimos_mensajes,
     _filtrar_y_recortar_nodos,
     _seleccionar_caja_mensaje,
-    es_ventana_whatsapp,
 )
 
 
@@ -138,13 +140,13 @@ def test_lector_chat_detecta_tipo_desktop_y_web_y_degrada_seguro(monkeypatch):
     lector = LectorChat()
 
     # Fuera de Windows siempre devuelve None sin lanzar excepciones.
-    monkeypatch.setattr(lector_chat.sys, 'platform', 'linux')
+    monkeypatch.setattr(uia_whatsapp.sys, 'platform', 'linux')
     assert lector.ventana_whatsapp_activa() is None
     assert lector.rect_ventana(1234) is None
     assert lector.leer_ultimo_mensaje(VentanaChat(1234, 'WhatsApp', (0, 0, 800, 600), 'desktop')) is None
 
     # Simulación en Windows para desktop y web.
-    monkeypatch.setattr(lector_chat.sys, 'platform', 'win32')
+    monkeypatch.setattr(uia_whatsapp.sys, 'platform', 'win32')
     titulos = ['(2) WhatsApp', 'WhatsApp - Google Chrome', 'BancoEstado - Google Chrome']
 
     class _FakeUser32:
@@ -163,22 +165,22 @@ def test_lector_chat_detecta_tipo_desktop_y_web_y_degrada_seguro(monkeypatch):
 
     monkeypatch.setattr(lector, 'rect_ventana', lambda hwnd: (10, 20, 900, 700))
 
-    monkeypatch.setattr(lector_chat, '_user32', lambda: _FakeUser32(titulos[0]))
+    monkeypatch.setattr(uia_whatsapp, '_user32', lambda: _FakeUser32(titulos[0]))
     v_desktop = lector.ventana_whatsapp_activa()
     assert v_desktop == VentanaChat(4242, '(2) WhatsApp', (10, 20, 900, 700), 'desktop')
 
-    monkeypatch.setattr(lector_chat, '_user32', lambda: _FakeUser32(titulos[1]))
+    monkeypatch.setattr(uia_whatsapp, '_user32', lambda: _FakeUser32(titulos[1]))
     v_web = lector.ventana_whatsapp_activa()
     assert v_web == VentanaChat(4242, 'WhatsApp - Google Chrome', (10, 20, 900, 700), 'web')
 
-    monkeypatch.setattr(lector_chat, '_user32', lambda: _FakeUser32(titulos[2]))
+    monkeypatch.setattr(uia_whatsapp, '_user32', lambda: _FakeUser32(titulos[2]))
     assert lector.ventana_whatsapp_activa() is None
 
     # Nunca intenta leer una ventana fuera de lista blanca aunque se pase manual.
     assert lector.leer_ultimo_mensaje(VentanaChat(4242, 'FraseYa', (0, 0, 500, 500), 'desktop')) is None
 
     # Si UIA falla inesperadamente, devuelve None sin lanzar.
-    monkeypatch.setattr(lector_chat, '_LectorUIA', lambda: (_ for _ in ()).throw(RuntimeError('fallo uia')))
+    monkeypatch.setattr(uia_whatsapp, '_LectorUIA', lambda: (_ for _ in ()).throw(RuntimeError('fallo uia')))
     assert lector.leer_ultimo_mensaje(v_desktop) is None
 
 
@@ -344,11 +346,20 @@ def test_puente_whatsapp_web_seguridad_y_flujo():
         assert st_sin_origin == 403
         assert len(recibidos) == cuenta_previa
 
-        # POST /mensaje sin Origin pero con X-FraseYa-Local: 1 -> 200
-        st_local, _, _ = _peticion(
+        # POST /mensaje sin Origin pero con valor estático antiguo '1' -> 403
+        st_estatico, _, _ = _peticion(
             puente.puerto, 'POST', '/mensaje',
             cuerpo=json.dumps({'texto': 'Mensaje local'}).encode('utf-8'),
             cabeceras={'X-FraseYa-Local': '1', 'Content-Type': 'application/json'},
+        )
+        assert st_estatico == 403
+        assert len(recibidos) == cuenta_previa
+
+        # POST /mensaje sin Origin pero con token aleatorio por instancia -> 200
+        st_local, _, _ = _peticion(
+            puente.puerto, 'POST', '/mensaje',
+            cuerpo=json.dumps({'texto': 'Mensaje local'}).encode('utf-8'),
+            cabeceras={'X-FraseYa-Local': puente.token_local, 'Content-Type': 'application/json'},
         )
         assert st_local == 200
         assert len(recibidos) == cuenta_previa + 1
@@ -407,7 +418,7 @@ def test_clasificar_contexto_espanol():
 
 # ---- ServicioAsistenteVivo --------------------------------------------------
 
-def test_servicio_inicia_pausado_y_agrupa_rafagas_y_deduplica():
+def test_servicio_inicia_pausado_y_al_analizar_agrupa_lote():
     frases = _frases_catalogo()
     recomendador = Mock()
     recomendador.sugerir.return_value = _sugerencias_tres(frases)
@@ -425,59 +436,49 @@ def test_servicio_inicia_pausado_y_agrupa_rafagas_y_deduplica():
         obtener_frases=lambda: frases,
         al_resultado=al_resultado,
         al_error=errores.append,
-        debounce_seg=0.12,
     )
     try:
-        # Opt-in por defecto: inicia pausado e ignora mensajes.
+        # Opt-in por defecto: inicia pausado y solo almacena en el búfer pasivo sin llamar a Gemini.
         assert servicio.activo is False
-        assert servicio.recibir_mensaje('Hola, ¿dónde está mi pedido?', chat='Cliente 1') is False
-        time.sleep(0.18)
+        assert servicio.registrar_mensaje_entrante('Hola, ¿dónde está mi pedido?', chat='Cliente 1') is True
         recomendador.sugerir.assert_not_called()
         assert resultados == []
 
-        # Al activar, agrupa ráfagas cortas y deduplica repetidos dentro de la ráfaga.
+        # Al activar, acumula y deduplica mensajes en memoria por chat sin disparar IA automática.
         servicio.activar()
         assert servicio.activo is True
-        servicio.recibir_mensaje('Hola', chat='Cliente 1')
-        servicio.recibir_mensaje('Mi pedido #123 no llega', chat='Cliente 1')
-        servicio.recibir_mensaje('Mi pedido #123 no llega', chat='Cliente 1')  # duplicado en ráfaga
+        assert servicio.registrar_mensaje_entrante('Mi pedido #123 no llega', chat='Cliente 1') is True
+        assert servicio.registrar_mensaje_entrante('Mi pedido #123 no llega', chat='Cliente 1') is True
+        recomendador.sugerir.assert_not_called()
+
+        mensajes = servicio.obtener_ultimos_mensajes(chat='Cliente 1')
+        assert mensajes == ['Hola, ¿dónde está mi pedido?', 'Mi pedido #123 no llega']
+        servicio.analizar_mensajes(mensajes)
 
         assert listo.wait(timeout=2.0)
         assert recomendador.sugerir.call_count == 1
         texto_enviado, frases_enviadas = recomendador.sugerir.call_args.args
-        assert texto_enviado == 'Hola\nMi pedido #123 no llega'
+        assert texto_enviado == 'Hola, ¿dónde está mi pedido?\nMi pedido #123 no llega'
         assert frases_enviadas == frases
 
         assert len(resultados) == 1
         res = resultados[0]
         assert isinstance(res, ResultadoVivo)
         assert res.tema == 'Pedido / Envío'
-        assert res.mensaje_origen == 'Hola\nMi pedido #123 no llega'
+        assert res.mensaje_origen == 'Hola, ¿dónde está mi pedido?\nMi pedido #123 no llega'
         assert len(res.opciones) == 3
         assert [o.indice for o in res.opciones] == [1, 2, 3]
         assert [o.tono for o in res.opciones] == ['empatica', 'directa', 'escalar']
-        assert res.opciones[0].etiqueta == 'Opción 1 · Empática'
-        assert res.opciones[1].etiqueta == 'Opción 2 · Directa'
-        assert res.opciones[2].etiqueta == 'Opción 3 · Escalar'
+        assert res.opciones[0].etiqueta == 'Opción 1 · Catálogo'
+        assert res.opciones[1].etiqueta == 'Opción 2 · Catálogo'
+        assert res.opciones[2].etiqueta == 'Opción 3 · Catálogo'
         assert all(isinstance(o, OpcionFlotante) for o in res.opciones)
         assert errores == []
-
-        # Deduplicación posterior: repetir el mismo mensaje en el mismo chat se ignora.
-        listo.clear()
-        assert servicio.recibir_mensaje('Mi pedido #123 no llega', chat='Cliente 1') is False
-        assert servicio.recibir_mensaje('Hola\nMi pedido #123 no llega', chat='Cliente 1') is False
-        time.sleep(0.18)
-        assert recomendador.sugerir.call_count == 1
-
-        # En OTRO chat el mismo texto sí se procesa.
-        assert servicio.recibir_mensaje('Mi pedido #123 no llega', chat='Cliente 2') is True
-        assert listo.wait(timeout=2.0)
-        assert recomendador.sugerir.call_count == 2
     finally:
         servicio.detener()
 
 
-def test_servicio_pausar_cancela_pendientes_y_lista_vacia_reporta_error():
+def test_servicio_pausar_invalida_epoca_y_lista_vacia_reporta_error():
     frases = _frases_catalogo()
     recomendador = Mock()
     recomendador.sugerir.return_value = []
@@ -495,19 +496,18 @@ def test_servicio_pausar_cancela_pendientes_y_lista_vacia_reporta_error():
         obtener_frases=lambda: frases,
         al_resultado=resultados.append,
         al_error=al_error,
-        debounce_seg=0.15,
     )
     try:
         servicio.activar()
-        servicio.recibir_mensaje('Mensaje que se cancela al pausar', chat='A')
+        epoca_antes = servicio._epoca
         servicio.pausar()
         assert servicio.activo is False
-        time.sleep(0.22)
-        recomendador.sugerir.assert_not_called()
+        assert servicio._epoca > epoca_antes
+        assert servicio._puede_emitir(epoca_antes) is False
 
         # Cuando sugerir devuelve [] y generar no entrega borrador, reporta error claro.
         servicio.activar()
-        servicio.recibir_mensaje('Consulta sin coincidencia', chat='B', inmediato=True)
+        servicio.analizar_mensajes(['Consulta sin coincidencia'])
         assert err_ev.wait(timeout=2.0)
         assert resultados == []
         assert len(errores) == 1
@@ -541,11 +541,10 @@ def test_servicio_fallback_generar_sin_guardar_en_sqlite_y_callback_analizando()
         al_resultado=al_resultado,
         al_error=errores.append,
         al_analizar=analizados.append,
-        debounce_seg=0.0,
     )
     try:
         servicio.activar()
-        servicio.recibir_mensaje('Hola\nQuiero comprar sushi', chat='Cliente Sushi', inmediato=True)
+        servicio.analizar_mensajes(['Hola', 'Quiero comprar sushi'])
         assert listo.wait(timeout=2.0)
 
         assert analizados == ['Hola\nQuiero comprar sushi']
@@ -563,9 +562,7 @@ def test_servicio_fallback_generar_sin_guardar_en_sqlite_y_callback_analizando()
             assert op.frase['origen'] == 'borrador_ia'
             assert 'sushi' in op.frase['contenido'].casefold()
             assert 'borrador generado por ia' in op.motivo.casefold()
-        # Las 3 variantes tienen textos diferenciados
         assert len({o.frase['contenido'] for o in res.opciones}) == 3
-        # Nunca modifica ni agrega el borrador al catálogo original
         assert len(frases) == 3
     finally:
         servicio.detener()
@@ -590,11 +587,10 @@ def test_servicio_fallback_generar_falla_reporta_error_claro():
         obtener_frases=lambda: frases,
         al_resultado=resultados.append,
         al_error=al_error,
-        debounce_seg=0.0,
     )
     try:
         servicio.activar()
-        servicio.recibir_mensaje('Quiero comprar sushi', chat='Cliente Sushi', inmediato=True)
+        servicio.analizar_mensajes(['Quiero comprar sushi'])
         assert err_ev.wait(timeout=2.0)
         assert resultados == []
         assert len(errores) == 1
@@ -616,13 +612,11 @@ def test_analizar_manual_funciona_inmediato_incluso_pausado():
         resultados.append(res)
         listo.set()
 
-    # debounce_seg alto para comprobar que analizar_manual NO espera debounce.
     servicio = ServicioAsistenteVivo(
         recomendador=recomendador,
         obtener_frases=lambda: frases,
         al_resultado=al_resultado,
         al_error=errores.append,
-        debounce_seg=10.0,
     )
     try:
         assert servicio.activo is False
@@ -753,15 +747,15 @@ def test_lector_ultimos_3_mensajes_y_enfocar_caja_mensaje(monkeypatch):
     assert _seleccionar_caja_mensaje([(0, 'Buscar', (40, 110, 360, 145))], rect_ventana) is None
 
     lector = LectorChat()
-    monkeypatch.setattr(lector_chat.sys, 'platform', 'linux')
+    monkeypatch.setattr(uia_whatsapp.sys, 'platform', 'linux')
     assert lector.leer_ultimos_mensajes(VentanaChat(10, 'WhatsApp', (0, 0, 800, 600), 'desktop')) == []
     assert lector.enfocar_caja_mensaje(10) is False
 
-    monkeypatch.setattr(lector_chat.sys, 'platform', 'win32')
+    monkeypatch.setattr(uia_whatsapp.sys, 'platform', 'win32')
     fake_uia = Mock()
     fake_uia.leer_ultimos_textos.return_value = ['Hola', 'Quiero comprar sushi', '¿Tienen envío?']
     fake_uia.enfocar_caja_mensaje.return_value = True
-    monkeypatch.setattr(lector_chat, '_LectorUIA', lambda: fake_uia)
+    monkeypatch.setattr(uia_whatsapp, '_LectorUIA', lambda: fake_uia)
     monkeypatch.setattr(lector, '_titulo_ventana', lambda hwnd: 'WhatsApp' if hwnd == 555 else 'FraseYa')
 
     win = VentanaChat(555, 'WhatsApp', (0, 0, 1280, 720), 'desktop')
@@ -1284,15 +1278,43 @@ def test_mensaje_largo_multiparrafo_conserva_turno_agente_previo():
 
 
 def test_enfocar_caja_mensaje_recurre_a_clic_seguro_si_uia_no_expone_edit(monkeypatch):
-    lector_uia = lector_chat._LectorUIA()
+    lector_uia = uia_whatsapp._LectorUIA()
     monkeypatch.setattr(lector_uia._ole32, 'CoInitializeEx', lambda *_: 0)
     monkeypatch.setattr(lector_uia._ole32, 'CoUninitialize', lambda: None)
     monkeypatch.setattr(lector_uia._ole32, 'CoCreateInstance', lambda *_: -2147467259)
     llamadas = []
     monkeypatch.setattr(
-        lector_chat,
+        uia_whatsapp,
         '_clic_seguro_en_caja',
         lambda hwnd, rc=None: (llamadas.append((hwnd, rc)), True)[1],
     )
     assert lector_uia.enfocar_caja_mensaje(12345) is True
     assert llamadas == [(12345, None)]
+
+
+def test_completar_hasta_tres_nunca_muta_frase_compartida():
+    frases = _frases_catalogo()
+    contenido_original = frases[0]['contenido']
+    recomendador = Mock()
+    recomendador.sugerir.return_value = [Sugerencia(frase=frases[0], motivo='Aplica directo')]
+    recomendador.generar.return_value = None
+
+    servicio = ServicioAsistenteVivo(
+        recomendador=recomendador,
+        obtener_frases=lambda: frases,
+        al_resultado=lambda _r: None,
+    )
+    try:
+        res = servicio.analizar_mensajes(['Mi pedido tiene demora'], asincrono=False)
+        assert res is not None
+        assert len(res.opciones) == 3
+        assert res.opciones[0].frase['origen'] == 'compartida'
+        assert res.opciones[0].frase['contenido'] == contenido_original
+        # Variantes generadas para completar hasta 3 nunca heredan origen='compartida'
+        for op in res.opciones[1:]:
+            if op.frase.get('id', 0) < 0:
+                assert op.frase['origen'] == 'borrador_ia'
+        assert frases[0]['origen'] == 'compartida'
+        assert frases[0]['contenido'] == contenido_original
+    finally:
+        servicio.detener()

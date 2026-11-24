@@ -85,17 +85,18 @@ class RepositorioTests(unittest.TestCase):
             self.repo.db.execute("UPDATE CATALOGO SET origen='compartida' WHERE id=?", (self.cat,))
         self.repo.db.rollback()
 
-    def test_crud_variables(self):
-        frase_id = self.frase(content='Texto')
-        ident = self.repo.crear_variable(frase_id, 'extra', 0)
-        self.repo.actualizar_variable(ident, 'otra', 2)
-        self.assertEqual(self.repo.listar_variables(frase_id)[0]['nombre'], 'otra')
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.repo.crear_variable(frase_id, 'otra', 3)
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.repo.crear_variable(frase_id, 'nuevo', 2)
-        self.repo.eliminar_variable(ident)
+    def test_variables_se_sincronizan_e_importacion_transaccional(self):
+        frase_id = self.frase(content='Hola {nombre}, orden {orden}')
+        self.assertEqual([v['nombre'] for v in self.repo.listar_variables(frase_id)], ['nombre', 'orden'])
+        self.repo.actualizar_frase(frase_id, self.category, 'Título', 'local', 'Sin variables')
         self.assertEqual(self.repo.listar_variables(frase_id), [])
+
+        cat_id, nueva_id, creada = self.repo.importar_frase_en_categoria(
+            self.cat, 'Soporte', 'Bienvenida', 'bienv', 'Hola {nombre}', color='#10B981'
+        )
+        self.assertTrue(creada)
+        self.assertEqual(self.repo.obtener_categoria(cat_id)['color'], '#10B981')
+        self.assertEqual([v['nombre'] for v in self.repo.obtener_frase(nueva_id)['variables']], ['nombre'])
 
     def test_configuracion_upsert(self):
         self.assertIsNone(self.repo.leer_configuracion('atajo'))
@@ -159,10 +160,6 @@ class RepositorioTests(unittest.TestCase):
             self.frase(content='  ')
         with self.assertRaises(ValueError):
             self.repo.guardar_configuracion('', '')
-        with self.assertRaises(LookupError):
-            self.repo.actualizar_variable(999, 'x', 0)
-        with self.assertRaises(LookupError):
-            self.repo.eliminar_variable(999)
 
 
 class ArranqueTests(unittest.TestCase):

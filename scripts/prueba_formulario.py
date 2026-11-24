@@ -1,4 +1,4 @@
-"""Prueba manual del formulario de campos variables (RF-03).
+"""Prueba manual del formulario Qt de campos variables (RF-03).
 
     python scripts/prueba_formulario.py                  # frase de ejemplo con 4 variables
     python scripts/prueba_formulario.py "Hola {nombre}"  # tu propia frase
@@ -9,16 +9,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
+from PySide6.QtWidgets import QApplication
 from fraseya.aplicacion.resolver_variables import resolver
-from fraseya.presentacion.formulario_variables import pedir_valores
+from fraseya.presentacion.qt_dialogos import completar_variables
 
 EJEMPLO = 'Gracias {nombre}, su caso {orden} por {monto} fue registrado el {fecha}. Saludos, {nombre}.'
 
 
 def main():
+    QApplication.instance() or QApplication([])
     contenido = sys.argv[1] if len(sys.argv) > 1 else EJEMPLO
     print(f'Frase: {contenido}')
-    texto = resolver(contenido, lambda nombres, iniciales: pedir_valores(nombres, iniciales))
+    texto = resolver(
+        contenido,
+        lambda nombres, iniciales: completar_variables(None, contenido, nombres, iniciales, flotante=True),
+    )
     print('Cancelado: no se inserta nada.' if texto is None else f'Resultado: {texto}')
 
 

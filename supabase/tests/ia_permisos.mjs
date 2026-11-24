@@ -1,6 +1,6 @@
 import {readFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
-const {PGlite}=await import(process.argv[2]);
+const {PGlite}=await import(process.argv[2] || '@electric-sql/pglite');
 const db=new PGlite();
 const id='00000000-0000-0000-0000-000000000001';
 const bloqueado='00000000-0000-0000-0000-000000000002';

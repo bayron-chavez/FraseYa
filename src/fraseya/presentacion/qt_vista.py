@@ -1,5 +1,4 @@
 """Interfaz nativa Qt unificada: todas las secciones viven dentro de la misma ventana."""
-import sys
 from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut, QFontDatabase, QPixmap, QColor
@@ -8,15 +7,17 @@ from PySide6.QtWidgets import (
     QPushButton, QLineEdit, QTextEdit, QComboBox, QListWidget, QListWidgetItem,
     QFrame, QSplitter, QScrollArea, QLayout, QStackedWidget,
 )
+from fraseya.aplicacion.buscador import buscar as buscar_frases
 from fraseya.aplicacion.configuracion import Configuracion
 from fraseya.aplicacion.resolver_variables import detectar, sustituir
+from fraseya.dominio.reglas import COLOR_DEFECTO, VARIABLES_OFICIALES
+from .identidad import recurso
 from .qt_paneles import (
-    ESTILO, ESTILO_OSCURO, hoja_estilo, paleta,
     boton, EtiquetaSegura, EtiquetaSegura as QLabel, Trabajos,
     PanelIA, PanelEmpresa, PanelAjustes, PanelImportar, PanelCategorias,
     PanelCatalogo, PanelUsuarios, PanelVariables,
 )
-from .qt_temas import normalizar_tema
+from .qt_temas import ESTILO, ESTILO_OSCURO, hoja_estilo, normalizar_tema, paleta
 
 
 class VentanaQt(QMainWindow):
@@ -37,7 +38,6 @@ class VentanaQt(QMainWindow):
         self.al_analizar_portapapeles = None
         self.al_sincronizar = None
         self.al_salir = None
-        self._publicando = False
         self._cerrando = False
         self.solicito_cerrar_sesion = False
         self._ia = None
@@ -54,8 +54,7 @@ class VentanaQt(QMainWindow):
         self.setWindowTitle('FraseYa · Interfaz Qt' + (' · Demostración' if demostracion else ''))
         self.resize(1200, 820)
         self.setMinimumSize(1060, 720)
-        icono = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[3])) / 'assets/fraseya.ico'
-        self.setWindowIcon(QIcon(str(icono)))
+        self.setWindowIcon(QIcon(str(recurso('fraseya.ico'))))
 
         self.trabajos = Trabajos(self)
         online = bool(sesion and sesion.token != 'offline')
@@ -455,10 +454,10 @@ class VentanaQt(QMainWindow):
         texto_vars = QLabel('VARIABLES')
         texto_vars.setObjectName('muted')
         variables.addWidget(texto_vars)
-        for nombre in ['nombre', 'pedido', 'fecha']:
+        for nombre in VARIABLES_OFICIALES[:3]:
             variables.addWidget(boton('{' + nombre + '}', lambda checked=False, n=nombre: self.insertar_variable(n)))
         otras = QComboBox()
-        otras.addItems(['Otra variable…', 'monto', 'correo', 'telefono', 'direccion', 'empresa', 'orden'])
+        otras.addItems(['Otra variable…', *VARIABLES_OFICIALES[3:]])
         otras.activated.connect(lambda index: (self.insertar_variable(otras.itemText(index)), otras.setCurrentIndex(0)) if index else None)
         variables.addWidget(otras)
         variables.addStretch()
@@ -565,28 +564,28 @@ class VentanaQt(QMainWindow):
         ident = self.seleccion['id'] if self.seleccion else None
         self.lista.blockSignals(True)
         self.lista.clear()
-        consulta = self.busqueda.text().casefold()
+        consulta = self.busqueda.text().strip()
         filtro = self.filtro.currentText()
-        for f in self.gestion.listar():
-            favorita = self.gestion.es_favorita(f)
+        categoria_filtro = self.filtro_categoria.currentText() if self.filtro_categoria.currentIndex() > 0 else None
+        frases = self.gestion.listar()
+        if consulta:
+            frases = buscar_frases(frases, consulta)
+        for f in frases:
+            favorita = bool(f.get('favorita'))
             if self.favoritas and not favorita:
                 continue
-            if self.filtro_categoria.currentIndex() > 0 and f.get('categoria') != self.filtro_categoria.currentText():
+            if categoria_filtro is not None and f.get('categoria') != categoria_filtro:
                 continue
             if filtro == 'Propias' and f['origen'] != 'propia' or filtro == 'Compartidas' and f['origen'] != 'compartida':
-                continue
-            if consulta not in ' '.join(str(f.get(k, '')) for k in ('titulo', 'contenido', 'abreviatura', 'categoria')).casefold():
                 continue
             item = QListWidgetItem(
                 ('[Favorita]  ' if favorita else '') + f['titulo'] + '\n'
                 + f['contenido'].replace('\n', ' ')[:65] + '…\n'
                 + f['abreviatura'] + '   ·   ' + f.get('categoria', 'General') + '   ·   ' + f['origen'].capitalize()
             )
-            categoria = next((c for c in self.gestion.repo.listar_categorias() if c['id'] == f['categoria_id']), None)
-            if categoria:
-                muestra = QPixmap(12, 12)
-                muestra.fill(QColor(categoria['color']))
-                item.setIcon(QIcon(muestra))
+            muestra = QPixmap(12, 12)
+            muestra.fill(QColor(f.get('color') or COLOR_DEFECTO))
+            item.setIcon(QIcon(muestra))
             item.setData(Qt.UserRole, f)
             self.lista.addItem(item)
             if f['id'] == ident:
@@ -836,8 +835,7 @@ class VentanaQt(QMainWindow):
 
     def tiene_operacion_en_curso(self):
         return bool(
-            self._publicando
-            or self.trabajos.pendientes
+            self.trabajos.pendientes
             or (self.panel_ia and self.panel_ia.ocupada)
             or (self.panel_empresa and self.panel_empresa.ocupada)
             or (self.panel_catalogo and self.panel_catalogo.ocupada)

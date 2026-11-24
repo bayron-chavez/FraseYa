@@ -125,8 +125,12 @@ def test_la_tecla_de_confirmacion_debe_ser_una_de_las_permitidas():
         tg.TecladoGlobal(MotorFalso(), 'f13')
 
 
-def test_ventana_activa_devuelve_un_identificador():
-    assert tg.ventana_activa() is not None
+def test_ventana_activa_devuelve_un_identificador(monkeypatch):
+    from fraseya.infraestructura import win32_com
+    real = tg.ventana_activa()
+    assert real is None or isinstance(real, int)
+    monkeypatch.setattr(win32_com, 'user32', lambda: SimpleNamespace(GetForegroundWindow=lambda: 98765))
+    assert tg.ventana_activa() == 98765
 
 
 # ---- atajo global del buscador (RF-02) -----------------------------------

@@ -139,4 +139,4 @@ class ServicioSincronizacion:
     def detener(self):
         self._parada.set()
         self._despertar.set()
-        # No espera al hilo de red: el cierre de Tkinter es inmediato.
+        # No espera al hilo de red: el cierre de la interfaz es inmediato.

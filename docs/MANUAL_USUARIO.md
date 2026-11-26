@@ -22,8 +22,12 @@ administrador. Entra con tu correo y contraseña de Supabase. Nunca introduzcas
 la contraseña de la base ni una clave secret/service_role.
 
 La aplicación admite cinco intentos por minuto. Si el servidor limita intentos,
-espera cinco minutos antes de reintentar. Las contraseñas y tokens no se guardan
-en disco. El límite local se reinicia al cerrar el programa; Supabase aplica sus
+espera cinco minutos antes de reintentar. Si marcas «Recordar sesión en este equipo», la próxima vez FraseYa entra sin
+pedir la contraseña. Se guardan cifrados el token de acceso, el correo y la
+contraseña; solo tu cuenta de Windows puede leerlos. No la marques en un equipo
+o cuenta de Windows compartida: tras «Cerrar sesión» el formulario queda
+rellenado y basta pulsar «Iniciar sesión». Para borrar esos datos, desmarca la
+casilla e inicia sesión. Cerrar la ventana conserva la sesión. El límite local se reinicia al cerrar el programa; Supabase aplica sus
 propios límites en el servidor.
 
 ## Crear y utilizar frases
@@ -97,7 +101,7 @@ Límites: 10 MB de archivo, 50 MB descomprimidos y 10.000 filas de datos.
 ## Sincronizar y trabajar sin conexión
 
 FraseYa comprueba el catálogo al abrir y según el intervalo de Configuración.
-«Sincronizar ahora» solicita una comprobación adicional. La ventana muestra la
+El botón de sincronizar del panel lateral pide una comprobación adicional. La ventana muestra la
 versión instalada, la última comprobación y el resultado. Si una abreviatura
 propia coincide con una compartida, renombra la propia: se rechaza la actualización
 completa y se conserva la versión anterior.

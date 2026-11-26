@@ -1,23 +1,26 @@
 """Arranque de producción Qt con Auth, sincronización, bandeja y asistente en vivo."""
+import json
 import queue
 import threading
 import time
 from pathlib import Path
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QEventLoop
 from PySide6.QtGui import QIcon, QAction
 from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon, QMenu
 from fraseya.infraestructura import RepositorioSQLite
 from fraseya.infraestructura.lector_chat import LectorChat, PuenteWhatsAppWeb, VentanaChat
-from fraseya.infraestructura.supabase import cargar_cliente, AutenticacionSupabase, RepositorioSupabase
+from fraseya.infraestructura.sesion_guardada import SesionGuardada
+from fraseya.infraestructura.supabase import cargar_cliente, AutenticacionSupabase, ErrorSupabase, RepositorioSupabase
 from fraseya.infraestructura.teclado_global import activar_ventana
 from fraseya.aplicacion.asistente_vivo import ServicioAsistenteVivo
 from fraseya.aplicacion.configuracion import Configuracion
-from fraseya.aplicacion.estado_sincronizacion import resumen_estado
+from fraseya.aplicacion.estado_sincronizacion import resumen_corto, resumen_estado
 from fraseya.aplicacion.gestion_frases import GestionFrases
 from fraseya.aplicacion.recomendaciones_ia import RecomendadorIA
 from fraseya.aplicacion.servicio_sincronizacion import ServicioSincronizacion
 from fraseya.aplicacion.sesion import registrar_ultimo_perfil, ruta_bd_sesion
 from .identidad import recurso
+from .qt_anfitrion import VentanaUnica
 from .qt_dialogos import AccesoQt, configurar_conexion
 from .qt_flotante import ControladorFlotanteQt
 from .qt_temas import hoja_estilo
@@ -25,16 +28,6 @@ from .qt_vista import VentanaQt
 
 
 _VENTANA_EXT_ACTIVA_SEG = 20.0
-
-
-def _leer_tema_inicial(ruta):
-    if not Path(ruta).exists():
-        return 'claro'
-    try:
-        with RepositorioSQLite(ruta) as repo:
-            return Configuracion(repo).leer().tema
-    except Exception:
-        return 'claro'
 
 
 def _texto_analizando(texto=''):
@@ -100,7 +93,6 @@ class _AsistenteVivoQt:
             al_analizar_portapapeles=self.analizar_portapapeles,
             al_ocultar=self.ocultar_flotante,
         )
-        ventana.al_cambiar_tema = self.controlador.aplicar_tema
         ventana.al_toggle_vivo = self.toggle_vivo
         ventana.al_probar_vivo = self.probar_vivo
         ventana.al_analizar_portapapeles = self.analizar_portapapeles
@@ -333,7 +325,6 @@ class _AsistenteVivoQt:
     def probar_vivo(self):
         self._modo_demo = True
         resultado = ServicioAsistenteVivo.crear_resultado_demo(self.ventana.gestion.listar())
-        self.controlador.aplicar_tema(self.ventana.tema_actual)
         self.controlador.mostrar_sugerencias(resultado, self._ultimo_rect)
         if self.ventana.panel_ia is not None:
             self.ventana.panel_ia.estado_vivo.setText(
@@ -414,14 +405,15 @@ def _crear_bandeja(ventana, sincronizar):
     menu = QMenu(ventana)
 
     def mostrar():
-        ventana.showNormal()
-        ventana.raise_()
-        ventana.activateWindow()
+        marco = ventana.window()
+        marco.showMaximized()
+        marco.raise_()
+        marco.activateWindow()
 
     for texto, accion in [
         ('Abrir FraseYa', mostrar),
         ('Sincronizar', sincronizar),
-        ('Ocultar ventana', ventana.hide),
+        ('Ocultar ventana', lambda: ventana.window().hide()),
         ('Salir', ventana.close),
     ]:
         a = QAction(texto, menu)
@@ -434,7 +426,7 @@ def _crear_bandeja(ventana, sincronizar):
     return tray
 
 
-def _ejecutar_sesion(app, auth, sesion, ruta_usuario, con_teclado):
+def _ejecutar_sesion(app, auth, sesion, ruta_usuario, con_teclado, anfitrion):
     with RepositorioSQLite(ruta_usuario) as repo:
         ventana = VentanaQt(GestionFrases(repo), autenticacion=auth, sesion=sesion)
         expansion = None
@@ -462,9 +454,9 @@ def _ejecutar_sesion(app, auth, sesion, ruta_usuario, con_teclado):
 
         def sincronizar():
             if sesion.token == 'offline':
-                ventana.sincronizacion.setText('Modo sin conexión · copia local')
+                ventana.sincronizacion.mostrar('offline', *resumen_corto(repo, 'offline'))
                 return
-            ventana.sincronizacion.setText('Comprobando catálogo…')
+            ventana.sincronizacion.mostrar('comprobando', *resumen_corto(repo, 'comprobando'))
             servicio.solicitar()
 
         ventana.al_configurar = configurar_ajustes
@@ -484,8 +476,8 @@ def _ejecutar_sesion(app, auth, sesion, ruta_usuario, con_teclado):
                     r = eventos.get_nowait()
                 except queue.Empty:
                     break
-                _estado, texto = resumen_estado(repo, r, sin_conexion=sesion.token == 'offline')
-                ventana.sincronizacion.setText(texto)
+                estado, texto = resumen_estado(repo, r, sin_conexion=sesion.token == 'offline')
+                ventana.sincronizacion.mostrar(estado, *resumen_corto(repo, estado), texto)
                 tray.setToolTip('FraseYa · ' + texto)
                 if r.estado == 'actualizada':
                     ventana.categorias()
@@ -497,8 +489,8 @@ def _ejecutar_sesion(app, auth, sesion, ruta_usuario, con_teclado):
         timer.timeout.connect(atender)
         timer.start(100)
 
-        _, texto = resumen_estado(repo, sin_conexion=sesion.token == 'offline')
-        ventana.sincronizacion.setText(texto)
+        estado, texto = resumen_estado(repo, sin_conexion=sesion.token == 'offline')
+        ventana.sincronizacion.mostrar(estado, *resumen_corto(repo, estado), texto)
 
         def detener():
             nonlocal detenido
@@ -512,26 +504,63 @@ def _ejecutar_sesion(app, auth, sesion, ruta_usuario, con_teclado):
                 asistente_vivo.detener()
             if expansion is not None:
                 expansion.detener()
-            app.quit()
+            bucle.quit()
 
+        bucle = QEventLoop()
         ventana.al_salir = detener
-        ventana.show()
+        anfitrion.mostrar(ventana)
         if sesion.token != 'offline':
             servicio.iniciar()
         try:
-            app.exec()
+            bucle.exec()
         finally:
             relanzar = bool(getattr(ventana, 'solicito_cerrar_sesion', False))
             detener()
-            ventana.deleteLater()
+            if relanzar:
+                # Queda a la vista, inactiva, hasta que el acceso la reemplace.
+                ventana.setEnabled(False)
+                ventana.show()
+            else:
+                anfitrion.quitar(ventana)
             app.processEvents()
         return relanzar
+
+
+def _guardar_token(almacen, url):
+    def guardar(token):
+        try:
+            almacen.guardar(url, token)
+        except OSError:
+            almacen.borrar()  # sin cifrado no se recuerda; se pedirá la contraseña
+    return guardar
+
+
+def _restaurar_sesion(auth, almacen):
+    """Entra con la sesión recordada. Devuelve (sesion, aviso)."""
+    token = almacen.leer(auth.cliente.url)
+    if not token:
+        return None, ''
+    try:
+        return auth.restaurar(token, _guardar_token(almacen, auth.cliente.url)), ''
+    except ErrorSupabase as error:
+        if error.estado in (400, 401, 403):
+            almacen.borrar()
+            return None, 'La sesión guardada venció. Inicia sesión nuevamente.'
+        return None, str(error)
+
+
+def _leer_credenciales(almacen, url):
+    try:
+        correo, clave = json.loads(almacen.leer(url) or '')
+        return str(correo), str(clave)
+    except (ValueError, TypeError):
+        return None
 
 
 def abrir(ruta, con_teclado=True, configurar=False):
     app = QApplication.instance() or QApplication([])
     app.setApplicationName('FraseYa')
-    app.setStyleSheet(hoja_estilo(_leer_tema_inicial(ruta)))
+    app.setStyleSheet(hoja_estilo())
     app.setWindowIcon(QIcon(str(recurso('fraseya.ico'))))
     app.setQuitOnLastWindowClosed(False)
 
@@ -541,26 +570,58 @@ def abrir(ruta, con_teclado=True, configurar=False):
             return
 
     auth = AutenticacionSupabase(cargar_cliente(archivo))
+    almacen = SesionGuardada(archivo.parent / 'sesion.dat')
+    # Correo y contraseña para rellenar el acceso; se conservan al cerrar sesión.
+    datos_acceso = SesionGuardada(archivo.parent / 'acceso.dat')
+    recordada = False
+    anfitrion = VentanaUnica()
+    acceso = None
     try:
+        sesion, aviso = _restaurar_sesion(auth, almacen)
+        recordada = sesion is not None
         while True:
-            app.setStyleSheet(hoja_estilo(_leer_tema_inicial(ruta)))
-            acceso = AccesoQt(auth)
-            if acceso.exec() != QDialog.Accepted or acceso.sesion is None:
-                break
-            sesion = acceso.sesion
+            if sesion is None:
+                acceso = AccesoQt(auth)
+                guardadas = _leer_credenciales(datos_acceso, auth.cliente.url)
+                if guardadas:
+                    acceso.precargar(*guardadas)
+                if aviso:
+                    acceso.aviso.setText(aviso)
+                    aviso = ''
+                if anfitrion.pedir_acceso(acceso) != QDialog.Accepted or acceso.sesion is None:
+                    break
+                sesion = acceso.sesion
+                recordada = sesion.token != 'offline' and getattr(acceso, 'recordar', False) is True
+                if recordada:
+                    auth.recordar(_guardar_token(almacen, auth.cliente.url))
+                    credenciales = getattr(acceso, 'credenciales', None)
+                    if isinstance(credenciales, tuple):
+                        _guardar_token(datos_acceso, auth.cliente.url)(json.dumps(credenciales))
+                elif sesion.token != 'offline':
+                    almacen.borrar()
+                    datos_acceso.borrar()
             auth.validar(sesion)
             registrar_ultimo_perfil(ruta, sesion)
             ruta_usuario = ruta_bd_sesion(ruta, sesion)
-            app.setStyleSheet(hoja_estilo(_leer_tema_inicial(ruta_usuario)))
             relanzar = False
             try:
-                relanzar = _ejecutar_sesion(app, auth, sesion, ruta_usuario, con_teclado)
+                # El formulario sigue a la vista hasta que la aplicación ocupa su lugar.
+                if isinstance(acceso, QDialog):
+                    acceso.show()
+                relanzar = _ejecutar_sesion(app, auth, sesion, ruta_usuario, con_teclado, anfitrion)
             finally:
-                if auth._sesion:
+                # Cerrar la ventana conserva la sesión recordada; «Cerrar sesión» la revoca.
+                if relanzar:
+                    almacen.borrar()
+                    recordada = False
+                if auth._sesion and not recordada:
                     auth.salir(auth._sesion)
             if not relanzar:
                 break
+            sesion = None
     finally:
-        if auth._sesion:
+        anfitrion.hide()
+        anfitrion.deleteLater()
+        if auth._sesion and not recordada:
             auth.salir(auth._sesion)
         auth.cerrar()

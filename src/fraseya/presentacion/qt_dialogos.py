@@ -3,14 +3,19 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QLineEdit,
-    QTextEdit, QDialogButtonBox, QMessageBox, QScrollArea,
+    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLineEdit,
+    QTextEdit, QDialogButtonBox, QMessageBox, QScrollArea, QCheckBox, QFrame,
 )
 from .identidad import recurso
 from .qt_paneles import (
     boton, EtiquetaSegura as QLabel, FormularioVariablesQt, Trabajos,
 )
 from .qt_temas import estilo_actual
+
+
+def _maximizar(dialogo):
+    dialogo.setWindowFlags(dialogo.windowFlags() | Qt.WindowMinMaxButtonsHint)
+    dialogo.setWindowState(Qt.WindowMaximized)
 
 
 class DialogoRed(QDialog):
@@ -35,37 +40,84 @@ class DialogoRed(QDialog):
             event.accept()
 
 
+def _panel_marca():
+    panel = QFrame()
+    panel.setObjectName('marca')
+    panel.setStyleSheet('QFrame#marca {background:#0a1f5c;}')
+    l = QVBoxLayout(panel)
+    l.setContentsMargins(80, 40, 60, 40)
+    l.setSpacing(18)
+    l.addStretch()
+    logo = QLabel()
+    logo.setPixmap(QPixmap(str(recurso('logo.png'))).scaled(130, 130, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    l.addWidget(logo)
+    textos = [('Las palabras,\na su tiempo.', 'color:#ffffff; font-size:44px; font-weight:700;')]
+    textos += [('✓   ' + t, 'color:#dbeafe; font-size:18px;') for t in (
+        'Expande frases con una abreviatura', 'Encuentra tus textos al instante',
+        'Completa variables antes de copiar')]
+    for texto, estilo in textos:
+        etiqueta = QLabel(texto)
+        etiqueta.setWordWrap(True)
+        etiqueta.setStyleSheet(estilo)
+        l.addWidget(etiqueta)
+    l.addStretch()
+    return panel
+
+
 class AccesoQt(DialogoRed):
     def __init__(self, autenticacion):
         super().__init__()
         self.auth = autenticacion
         self.sesion = None
+        self.recordar = False
+        self.credenciales = None
+        self._intento = None
         self.setWindowTitle('FraseYa · Iniciar sesión')
-        self.resize(430, 460)
-        l = QVBoxLayout(self)
-        l.setContentsMargins(40, 25, 40, 25)
-        l.setSpacing(14)
-        logo = QLabel()
-        logo.setAlignment(Qt.AlignCenter)
-        logo.setPixmap(QPixmap(str(recurso('logo.png'))).scaled(78, 78, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        l.addWidget(logo)
-        titulo = QLabel('Bienvenido a FraseYa')
+        self.resize(1100, 720)
+        exterior = QHBoxLayout(self)
+        exterior.setContentsMargins(0, 0, 0, 0)
+        exterior.setSpacing(0)
+        exterior.addWidget(_panel_marca(), 1)
+
+        # Columna centrada de ancho fijo: el formulario no se estira al maximizar.
+        columna = QWidget()
+        columna.setFixedWidth(400)
+        lado = QHBoxLayout()
+        lado.addStretch()
+        lado.addWidget(columna)
+        lado.addStretch()
+        exterior.addLayout(lado, 1)
+        l = QVBoxLayout(columna)
+        l.setSpacing(12)
+        l.addStretch()
+        titulo = QLabel('Iniciar sesión')
         titulo.setObjectName('heading')
         l.addWidget(titulo)
+        l.addWidget(QLabel('Entra con la cuenta de tu equipo.'))
+        l.addSpacing(14)
+        l.addWidget(QLabel('Correo electrónico'))
         self.usuario = QLineEdit()
-        self.usuario.setPlaceholderText('Correo electrónico')
+        self.usuario.setPlaceholderText('nombre@empresa.com')
+        self.usuario.setMinimumHeight(44)
         l.addWidget(self.usuario)
+        l.addWidget(QLabel('Contraseña'))
         self.clave = QLineEdit()
-        self.clave.setPlaceholderText('Contraseña')
+        self.clave.setPlaceholderText('Tu contraseña')
         self.clave.setEchoMode(QLineEdit.Password)
+        self.clave.setMinimumHeight(44)
         l.addWidget(self.clave)
+        self.casilla_recordar = QCheckBox('Recordar sesión en este equipo')
+        l.addWidget(self.casilla_recordar)
         self.aviso = QLabel('')
         self.aviso.setWordWrap(True)
         l.addWidget(self.aviso)
         self.entrar = boton('Iniciar sesión', self.iniciar, True)
+        self.entrar.setMinimumHeight(46)
         l.addWidget(self.entrar)
         self.offline = boton('Trabajar sin conexión', self.sin_conexion)
+        self.offline.setMinimumHeight(44)
         l.addWidget(self.offline)
+        l.addStretch()
         self.clave.returnPressed.connect(self.iniciar)
 
     def iniciar(self):
@@ -73,13 +125,20 @@ class AccesoQt(DialogoRed):
             return
         correo, clave = self.usuario.text(), self.clave.text()
         self.clave.clear()
+        self._intento = (correo, clave)
         self.ocupada = True
         self.entrar.setEnabled(False)
         self.offline.setEnabled(False)
         self.aviso.setText('Conectando…')
         self.trabajos.ejecutar(lambda: self.auth.iniciar_sesion(correo, clave), self.terminar)
 
+    def precargar(self, correo, clave):
+        self.usuario.setText(correo)
+        self.clave.setText(clave)
+        self.casilla_recordar.setChecked(True)
+
     def terminar(self, sesion, error):
+        intento, self._intento = self._intento, None
         self.ocupada = False
         self.entrar.setEnabled(True)
         self.offline.setEnabled(True)
@@ -87,6 +146,8 @@ class AccesoQt(DialogoRed):
             self.aviso.setText(str(error) if isinstance(error, (ValueError, PermissionError)) else 'No se pudo iniciar sesión.')
             return
         self.sesion = sesion
+        self.recordar = self.casilla_recordar.isChecked()
+        self.credenciales = intento if self.recordar else None
         self.trabajos.detener()
         self.accept()
 
@@ -105,7 +166,9 @@ def configurar_conexion(ruta, parent=None):
     d.setStyleSheet(estilo_actual())
     d.setWindowTitle('Conexión de FraseYa')
     d.resize(570, 280)
+    _maximizar(d)
     l = QVBoxLayout(d)
+    l.setAlignment(Qt.AlignTop)
     l.addWidget(QLabel('URL de Supabase y clave pública publishable o anon.'))
     url, clave = QLineEdit(), QLineEdit()
     url.setPlaceholderText('https://proyecto.supabase.co')

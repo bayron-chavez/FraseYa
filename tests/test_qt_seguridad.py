@@ -64,7 +64,7 @@ def test_offline_no_expone_acciones_centrales_ni_html(app):
         g.crear('<img src="https://example.test/a">', '!html', 'Texto', cat)
         v = VentanaQt(g, autenticacion=Mock(), sesion=Sesion('Offline', 'usuario', 'offline'))
         assert not v.nav_ia.isEnabled()
-        assert 'Publicar catálogo' not in [b.text() for b in v.findChildren(QPushButton)]
+        assert 'Catálogo compartido' not in [b.text().strip() for b in v.findChildren(QPushButton)]
         etiqueta = EtiquetaSegura('<b>Texto de usuario</b>')
         assert etiqueta.textFormat() == Qt.PlainText
         v.close()

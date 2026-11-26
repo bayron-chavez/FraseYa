@@ -2,7 +2,7 @@ from PyInstaller.utils.hooks import collect_data_files
 
 datos = [('docs/LICENCIAS_QT.md', 'licencias'), ('licenses/LGPL-3.0.txt', 'licencias'), ('licenses/GPL-3.0.txt', 'licencias')]
 datos += [('src/fraseya/infraestructura/schema.sql', 'fraseya/infraestructura')]
-datos += [('assets/logo.png', 'assets'), ('assets/fraseya.ico', 'assets')]
+datos += [('assets/logo.png', 'assets'), ('assets/fraseya.ico', 'assets'), ('assets/chevron.svg', 'assets')]
 a = Analysis(['main.py'], pathex=['src'], binaries=[], datas=datos,
     hiddenimports=['defusedxml'],
     excludes=['pytest', 'coverage', 'pip', 'lxml', 'matplotlib', 'numpy', 'pandas', 'tkinter', 'customtkinter', 'pystray',

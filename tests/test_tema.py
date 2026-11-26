@@ -184,7 +184,7 @@ def test_hoja_estilo_selectores_contraste_y_fallback():
 
     # Colores distintivos de tema claro vs oscuro.
     assert '#f5f7fb' in ESTILO
-    assert '#26364c' in ESTILO
+    assert '#000000' in ESTILO
     for color_oscuro in ('#0f141c', '#161d28', '#1c2533', '#111824', '#2a3649', '#eef2f7', '#94a3b8', '#3b82f6'):
         assert color_oscuro in ESTILO_OSCURO
 

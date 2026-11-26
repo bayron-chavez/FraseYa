@@ -20,7 +20,7 @@ def test_arranque_qt_offline_conserva_datos_y_cierra(tmp_path):
     auth=Mock(); auth._sesion=None; auth.cliente.url='https://example.supabase.co'
     acceso=Mock(); acceso.exec.return_value=QDialog.Accepted; acceso.sesion=Sesion('Offline','usuario','offline')
     def cerrar():
-        for w in app.topLevelWidgets():
+        for w in app.allWidgets():
             if isinstance(w,VentanaQt): w.close()
     QTimer.singleShot(100,cerrar)
     with patch('fraseya.presentacion.qt_aplicacion.cargar_cliente'),patch('fraseya.presentacion.qt_aplicacion.AutenticacionSupabase',return_value=auth),patch('fraseya.presentacion.qt_aplicacion.AccesoQt',return_value=acceso):
@@ -131,7 +131,7 @@ def test_flujo_bajo_demanda_no_bombardea_ia_y_leer_ultimos_3_inserta_en_whatsapp
     observado = {}
 
     def ejecutar_flujo():
-        ventanas = [w for w in app.topLevelWidgets() if isinstance(w, VentanaQt) and w.isVisible()]
+        ventanas = [w for w in app.allWidgets() if isinstance(w, VentanaQt) and w.isVisible()]
         if not ventanas:
             QTimer.singleShot(50, ejecutar_flujo)
             return
@@ -200,9 +200,9 @@ def test_flujo_bajo_demanda_no_bombardea_ia_y_leer_ultimos_3_inserta_en_whatsapp
     assert 'WhatsApp' in observado['aviso_tras_usar']
 
 
-def test_arranque_qt_online_tema_oscuro_asistente_vivo_y_cierre_limpio(tmp_path):
+def test_arranque_qt_online_tema_claro_asistente_vivo_y_cierre_limpio(tmp_path):
     from fraseya.aplicacion.configuracion import Configuracion
-    from fraseya.presentacion.qt_temas import ESTILO_OSCURO
+    from fraseya.presentacion.qt_temas import ESTILO
 
     app = QApplication.instance() or QApplication([])
     ruta = tmp_path / 'fraseya_online.db'
@@ -239,7 +239,7 @@ def test_arranque_qt_online_tema_oscuro_asistente_vivo_y_cierre_limpio(tmp_path)
     observado = {}
 
     def interactuar_y_cerrar():
-        ventanas = [w for w in app.topLevelWidgets() if isinstance(w, VentanaQt) and w.isVisible()]
+        ventanas = [w for w in app.allWidgets() if isinstance(w, VentanaQt) and w.isVisible()]
         if not ventanas:
             QTimer.singleShot(50, interactuar_y_cerrar)
             return
@@ -262,11 +262,6 @@ def test_arranque_qt_online_tema_oscuro_asistente_vivo_y_cierre_limpio(tmp_path)
         observado['chip_animo_tras_activar'] = controladores[0].barra.chip_animo.text()
         observado['aviso_tras_activar'] = controladores[0].barra.lbl_aviso.text()
 
-        # Cambiar tema desde VentanaQt sincroniza las ventanas flotantes
-        v.alternar_tema()
-        app.processEvents()
-        observado['ctrl_tema_tras_cambio'] = controladores[0].tema
-
         v.close()
 
     QTimer.singleShot(120, interactuar_y_cerrar)
@@ -278,9 +273,9 @@ def test_arranque_qt_online_tema_oscuro_asistente_vivo_y_cierre_limpio(tmp_path)
          patch('fraseya.presentacion.qt_aplicacion.ControladorFlotanteQt', side_effect=crear_controlador):
         abrir(ruta, con_teclado=False)
 
-    assert observado['estilo_sesion'] == ESTILO_OSCURO
-    assert observado['tema_inicial'] == 'oscuro'
-    assert observado['ctrl_tema_inicial'] == 'oscuro'
+    assert observado['estilo_sesion'] == ESTILO
+    assert observado['tema_inicial'] == 'claro'
+    assert observado['ctrl_tema_inicial'] == 'claro'
     assert observado['tarjetas_demo'] >= 1
     assert observado['barra_visible'] is True
     assert 'Pedido' in observado['chip_tema_demo']
@@ -289,7 +284,6 @@ def test_arranque_qt_online_tema_oscuro_asistente_vivo_y_cierre_limpio(tmp_path)
     assert observado['chip_tema_tras_activar'] == 'Esperando mensaje…'
     assert observado['chip_animo_tras_activar'] == 'Ánimo: —'
     assert 'Escuchando WhatsApp' in observado['aviso_tras_activar']
-    assert observado['ctrl_tema_tras_cambio'] == 'claro'
     puente_falso.iniciar.assert_called_once()
     puente_falso.detener.assert_called_once()
     servicio_sync_falso.detener.assert_called_once()
@@ -313,7 +307,7 @@ def test_arranque_qt_online_tolera_puerto_puente_ocupado(tmp_path):
     estado_reportado = []
 
     def activar_y_cerrar():
-        ventanas = [w for w in app.topLevelWidgets() if isinstance(w, VentanaQt) and w.isVisible()]
+        ventanas = [w for w in app.allWidgets() if isinstance(w, VentanaQt) and w.isVisible()]
         if not ventanas:
             QTimer.singleShot(50, activar_y_cerrar)
             return
@@ -368,7 +362,7 @@ def test_cambio_de_usuario_en_misma_app_aisla_frases_locales_y_conserva_por_corr
 
         def actuar():
             ventanas = [
-                w for w in app.topLevelWidgets()
+                w for w in app.allWidgets()
                 if isinstance(w, VentanaQt) and w.isVisible() and not w._cerrando
             ]
             if not ventanas:
@@ -444,7 +438,7 @@ def test_offline_abre_catalogo_del_ultimo_perfil_conectado(tmp_path):
 
         def actuar():
             ventanas = [
-                w for w in app.topLevelWidgets()
+                w for w in app.allWidgets()
                 if isinstance(w, VentanaQt) and w.isVisible() and not w._cerrando
             ]
             if not ventanas:

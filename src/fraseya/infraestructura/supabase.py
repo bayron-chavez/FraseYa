@@ -1,4 +1,4 @@
-"""Supabase Auth y Data API; claves públicas, sesiones solo en memoria."""
+"""Supabase Auth y Data API; claves públicas. Tokens en memoria salvo «Recordar sesión»."""
 import base64
 import json
 import time
@@ -70,6 +70,7 @@ class ClienteSupabase:
         self._lock = RLock()
         self._access = self._refresh = None
         self._vence = 0
+        self.al_renovar = None
         self._abrir = build_opener(SinRedirecciones()).open
         self.limite_acceso = LimiteAcceso()
 
@@ -126,6 +127,9 @@ class ClienteSupabase:
                 raise ValueError()
             self._access, self._refresh = access, refresh
             self._vence = self._reloj() + ttl
+            # Supabase rota el token de renovación: hay que guardar siempre el último.
+            if self.al_renovar:
+                self.al_renovar(refresh)
         except (KeyError, TypeError, ValueError):
             self.limpiar()
             raise ErrorSupabase('Respuesta de sesión inválida.') from None
@@ -152,6 +156,23 @@ class ClienteSupabase:
             self.limpiar()
             raise
 
+    def restaurar(self, token, al_renovar):
+        self.limpiar()
+        try:
+            self.al_renovar = al_renovar
+            self._guardar_tokens(self.solicitar('POST', '/auth/v1/token?grant_type=refresh_token',
+                {'refresh_token': token}, autenticado=False))
+            return self.perfil()
+        except Exception:
+            self.limpiar()
+            raise
+
+    def recordar(self, al_renovar):
+        with self._lock:
+            self.al_renovar = al_renovar
+            if self._refresh:
+                al_renovar(self._refresh)
+
     def perfil(self):
         filas = self.solicitar('POST', '/rest/v1/rpc/fraseya_perfil', {})
         if (not isinstance(filas, list) or len(filas) != 1 or not isinstance(filas[0], dict)
@@ -165,6 +186,7 @@ class ClienteSupabase:
         with self._lock:
             self._access = self._refresh = None
             self._vence = 0
+            self.al_renovar = None
 
 
 class AutenticacionSupabase:
@@ -179,7 +201,15 @@ class AutenticacionSupabase:
             if self._cerrada:
                 raise ErrorSupabase('La ventana de acceso se cerró.')
             self._sesion = None
-        perfil = self.cliente.entrar(nombre, clave)
+        return self._abrir_sesion(self.cliente.entrar(nombre, clave))
+
+    def restaurar(self, token, al_renovar):
+        return self._abrir_sesion(self.cliente.restaurar(token, al_renovar))
+
+    def recordar(self, al_renovar):
+        self.cliente.recordar(al_renovar)
+
+    def _abrir_sesion(self, perfil):
         with self._lock:
             if self._cerrada:
                 self.cliente.limpiar()

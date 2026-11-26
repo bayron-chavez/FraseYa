@@ -21,7 +21,11 @@ necesario aplicar migraciones ni modificar datos de cuentas o del catálogo.
 
 El login rechaza campos vacíos/excesivos antes de la petición, invalida la sesión
 anterior al intentar otra cuenta y borra la contraseña del formulario tras la
-respuesta. El backend mantiene tokens solo en RAM y los descarta tras un fallo.
+respuesta. El backend mantiene tokens en RAM y los descarta tras un fallo.
+Cambio posterior a esta revisión: con «Recordar sesión» (opcional, desmarcado por
+defecto) el token de renovación (`datos/sesion.dat`) y el correo y la contraseña
+(`datos/acceso.dat`) se guardan cifrados con Windows DPAPI. Cerrar sesión no
+borra `acceso.dat`. No protege frente a programas que ejecute esa misma cuenta de Windows.
 Las pruebas incluyen cien intentos concurrentes sobre el limitador: solo cinco
 obtienen permiso; credenciales erróneas producen un mensaje común.
 

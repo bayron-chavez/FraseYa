@@ -23,8 +23,10 @@ Configura primero el proyecto siguiendo [SUPABASE.md](docs/SUPABASE.md).
 Los proyectos existentes deben aplicar la migración de seguridad 002; no deben
 volver a ejecutar la migración inicial 001.
 
-La configuración pública está en datos/supabase.json. No se guardan contraseñas
-ni tokens de Supabase en disco. Sin configuración válida la aplicación informa
+La configuración pública está en datos/supabase.json. Solo si se marca
+«Recordar sesión» se guardan, cifrados con Windows DPAPI, el token de renovación
+(datos/sesion.dat) y el correo y contraseña (datos/acceso.dat). «Cerrar sesión»
+elimina el token; el correo y la contraseña quedan rellenados en el acceso. Sin configuración válida la aplicación informa
 el problema y no crea cuentas locales como alternativa.
 
 El botón Trabajar sin conexión abre los datos de este equipo; no permite leer

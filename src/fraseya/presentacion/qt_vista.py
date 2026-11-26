@@ -1,28 +1,33 @@
 """Interfaz nativa Qt unificada: todas las secciones viven dentro de la misma ventana."""
 from pathlib import Path
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon, QKeySequence, QShortcut, QFontDatabase, QPixmap, QColor
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut, QFontDatabase
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLineEdit, QTextEdit, QComboBox, QListWidget, QListWidgetItem,
-    QFrame, QSplitter, QScrollArea, QLayout, QStackedWidget,
+    QFrame, QScrollArea, QLayout, QStackedWidget,
 )
 from fraseya.aplicacion.buscador import buscar as buscar_frases
-from fraseya.aplicacion.configuracion import Configuracion
+from fraseya.aplicacion.configuracion import Configuracion, TEMA_PREDETERMINADO
 from fraseya.aplicacion.resolver_variables import detectar, sustituir
-from fraseya.dominio.reglas import COLOR_DEFECTO, VARIABLES_OFICIALES
+from fraseya.dominio.reglas import VARIABLES_OFICIALES
+from . import qt_desplegables, qt_lateral
 from .identidad import recurso
+from .qt_frases import (
+    ColumnaFiltros, DelegadoFrase, barra_acciones, estado_editor, marcar_favorita, poner_icono,
+)
 from .qt_paneles import (
     boton, EtiquetaSegura, EtiquetaSegura as QLabel, Trabajos,
     PanelIA, PanelEmpresa, PanelAjustes, PanelImportar, PanelCategorias,
-    PanelCatalogo, PanelUsuarios, PanelVariables,
+    PanelCatalogo, PanelVariables,
 )
-from .qt_temas import ESTILO, ESTILO_OSCURO, hoja_estilo, normalizar_tema, paleta
+from .qt_temas import ESTILO, ESTILO_OSCURO, hoja_estilo, paleta
 
 
 class VentanaQt(QMainWindow):
     def __init__(self, gestion, demostracion=False, autenticacion=None, sesion=None):
         super().__init__()
+        qt_desplegables.activar()
         fuente = Path('C:/Windows/Fonts/segoeui.ttf')
         if fuente.exists():
             QFontDatabase.addApplicationFont(str(fuente))
@@ -32,7 +37,6 @@ class VentanaQt(QMainWindow):
         self.autenticacion, self.sesion = autenticacion, sesion
         self.al_cambiar = None
         self.al_configurar = None
-        self.al_cambiar_tema = None
         self.al_toggle_vivo = None
         self.al_probar_vivo = None
         self.al_analizar_portapapeles = None
@@ -49,7 +53,7 @@ class VentanaQt(QMainWindow):
         self._var_pendiente = None
         self._nav_botones = {}
         self._paginas = {}
-        self.tema_actual = normalizar_tema(Configuracion(self.gestion.repo).leer().tema)
+        self.tema_actual = TEMA_PREDETERMINADO
 
         self.setWindowTitle('FraseYa · Interfaz Qt' + (' · Demostración' if demostracion else ''))
         self.resize(1200, 820)
@@ -68,63 +72,52 @@ class VentanaQt(QMainWindow):
 
         # Barra lateral
         lateral = QFrame()
-        lateral.setObjectName('sidebar')
-        lateral.setFixedWidth(216)
+        lateral.setObjectName('lateral')
+        lateral.setFixedWidth(qt_lateral.ANCHO - 2)
         nav = QVBoxLayout(lateral)
-        nav.setContentsMargins(16, 26, 16, 20)
-        nav.setSpacing(6)
-        marca = QLabel('FraseYa')
-        marca.setObjectName('brand')
-        nav.addWidget(marca)
-        lema = QLabel('Las palabras, a su tiempo.')
-        lema.setObjectName('muted')
-        nav.addWidget(lema)
-        nav.addSpacing(22)
+        nav.setContentsMargins(14, 18, 14, 14)
+        nav.setSpacing(2)
+        nav.addLayout(qt_lateral.marca())
+        nav.addSpacing(10)
 
+        def grupo(texto):
+            nav.addSpacing(14)
+            nav.addWidget(qt_lateral.etiqueta(texto, 'lateral_grupo'))
+
+        grupo('BIBLIOTECA')
         self.nav_frases = self._agregar_nav(nav, 'frases', 'Mis frases', lambda: self.cambiar_vista(False))
         self.nav_favoritas = self._agregar_nav(nav, 'favoritas', 'Favoritas', lambda: self.cambiar_vista(True))
 
         if not demostracion:
+            grupo('HERRAMIENTAS')
             self.nav_ia = self._agregar_nav(nav, 'ia', 'Asistente IA', self.abrir_ia)
             self.nav_ia.setEnabled(online)
             self.nav_importar = self._agregar_nav(nav, 'importar', 'Importar Excel', self.importar_excel)
-            self.nav_configuracion = self._agregar_nav(nav, 'configuracion', 'Configuración', self.ajustes)
-            btn_sync = boton('Sincronizar ahora', self.sincronizar)
-            btn_sync.setObjectName('nav')
-            nav.addWidget(btn_sync)
-
-            self.sincronizacion = QLabel('Catálogo central · Supabase')
-            self.sincronizacion.setWordWrap(True)
-            self.sincronizacion.setObjectName('muted')
-            self.sincronizacion.setContentsMargins(12, 4, 8, 4)
-            nav.addWidget(self.sincronizacion)
 
             if es_admin:
-                et_admin = QLabel('ADMINISTRACIÓN')
-                et_admin.setObjectName('nav_group')
-                nav.addWidget(et_admin)
-                self.nav_publicar = self._agregar_nav(nav, 'publicar', 'Publicar catálogo', lambda: self.publicar(False))
-                self.nav_retirar = self._agregar_nav(nav, 'retirar', 'Retirar del catálogo', lambda: self.publicar(True))
-                self.nav_categorias = self._agregar_nav(nav, 'categorias', 'Gestionar categorías', self.categorias_admin)
-                self.nav_usuarios = self._agregar_nav(nav, 'usuarios', 'Administrar usuarios', self.abrir_usuarios)
+                grupo('ADMINISTRACIÓN')
+                self.nav_catalogo = self._agregar_nav(nav, 'publicar', 'Catálogo compartido', lambda: self.publicar(False))
+                self.nav_categorias = self._agregar_nav(nav, 'categorias', 'Categorías', self.categorias_admin)
 
         nav.addStretch()
-        nota = QLabel('Demostración · datos temporales' if demostracion else ((sesion.usuario + '\n' + sesion.rol) if sesion else 'FraseYa'))
-        nota.setWordWrap(True)
-        nota.setObjectName('muted')
-        nota.setContentsMargins(8, 0, 8, 6)
-        nav.addWidget(nota)
-        self.btn_tema = boton('', self.alternar_tema, estilo='theme_toggle')
-        self.btn_tema.setToolTip('Cambiar entre tema claro y tema oscuro')
-        nav.addWidget(self.btn_tema)
-        if not demostracion:
-            nav.addWidget(boton('Cerrar sesión', self.cerrar_sesion))
+        if demostracion:
+            nav.addWidget(qt_lateral.etiqueta('Demostración · datos temporales', 'lateral_tenue'))
+        else:
+            self.nav_configuracion = self._agregar_nav(nav, 'configuracion', 'Configuración', self.ajustes)
+            self.sincronizacion = qt_lateral.TarjetaSync(self.sincronizar)
+            nav.addSpacing(6)
+            nav.addWidget(self.sincronizacion)
+            if sesion:
+                nav.addSpacing(8)
+                nav.addWidget(qt_lateral.separador())
+                nav.addSpacing(8)
+                nav.addLayout(qt_lateral.perfil(sesion.usuario, sesion.rol, self.cerrar_sesion))
 
         desplazamiento = QScrollArea()
         desplazamiento.setWidgetResizable(True)
         desplazamiento.setFrameShape(QFrame.NoFrame)
         desplazamiento.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        desplazamiento.setFixedWidth(218)
+        desplazamiento.setFixedWidth(qt_lateral.ANCHO)
         desplazamiento.setWidget(lateral)
         base.addWidget(desplazamiento)
 
@@ -173,7 +166,6 @@ class VentanaQt(QMainWindow):
         self.panel_importar = None
         self.panel_categorias = None
         self.panel_catalogo = None
-        self.panel_usuarios = None
 
         if not demostracion:
             self.panel_ajustes = PanelAjustes(
@@ -228,43 +220,13 @@ class VentanaQt(QMainWindow):
                 )
                 self._registrar_pagina('publicar', self.panel_catalogo)
 
-                self.panel_usuarios = PanelUsuarios(
-                    al_volver=lambda: self.cambiar_vista(self.favoritas),
-                    parent=self,
-                )
-                self._registrar_pagina('usuarios', self.panel_usuarios)
 
         QShortcut(QKeySequence('Ctrl+K'), self, activated=self._enfocar_busqueda)
-        self.aplicar_tema(self.tema_actual)
+        qss = hoja_estilo(self.tema_actual)
+        QApplication.instance().setStyleSheet(qss)
+        self.setStyleSheet(qss)
         self.categorias()
         self.cambiar_vista(False)
-
-    def aplicar_tema(self, tema):
-        nuevo = normalizar_tema(tema)
-        self.tema_actual = nuevo
-        qss = hoja_estilo(nuevo)
-        app = QApplication.instance()
-        if app is not None:
-            app.setStyleSheet(qss)
-        self.setStyleSheet(qss)
-        if hasattr(self, 'btn_tema'):
-            self.btn_tema.setText('Tema claro' if nuevo == 'oscuro' else 'Tema oscuro')
-        if self.panel_ajustes is not None:
-            self.panel_ajustes.establecer_tema(nuevo)
-        if self._controlador_vivo_demo is not None:
-            self._controlador_vivo_demo.aplicar_tema(nuevo)
-        if self.al_cambiar_tema:
-            self.al_cambiar_tema(nuevo)
-
-    def alternar_tema(self):
-        nuevo = 'claro' if self.tema_actual == 'oscuro' else 'oscuro'
-        cambios = Configuracion(self.gestion.repo).guardar({'tema': nuevo})
-        self.aplicar_tema(cambios.tema)
-        if self.al_configurar:
-            self.al_configurar(cambios)
-        if hasattr(self, 'estado'):
-            self.estado.setText(f'Tema visual aplicado: {"Oscuro" if cambios.tema == "oscuro" else "Claro"}.')
-        return cambios.tema
 
     def _manejar_toggle_vivo(self, activo):
         if self.al_toggle_vivo is not None:
@@ -300,7 +262,6 @@ class VentanaQt(QMainWindow):
                 al_analizar_portapapeles=self._manejar_analizar_portapapeles,
             )
         resultado = ServicioAsistenteVivo.crear_resultado_demo(self.gestion.listar())
-        self._controlador_vivo_demo.aplicar_tema(self.tema_actual)
         self._controlador_vivo_demo.mostrar_sugerencias(resultado)
         if self.panel_ia is not None:
             self.panel_ia.estado_vivo.setText(
@@ -324,8 +285,9 @@ class VentanaQt(QMainWindow):
         self.panel_ia.estado_vivo.setText('Mensaje del portapapeles cargado. Pulsa «Preparar respuesta».')
 
     def _agregar_nav(self, layout, clave, texto, accion):
-        b = boton(texto, accion)
+        b = boton('  ' + texto, accion)
         b.setObjectName('nav')
+        qt_lateral.poner_icono(b, clave)
         b.setCheckable(True)
         layout.addWidget(b)
         self._nav_botones[clave] = b
@@ -363,16 +325,18 @@ class VentanaQt(QMainWindow):
 
     def _crear_pagina_frases(self):
         pagina = QWidget()
+        pagina.setObjectName('pagina_frases')
         cuerpo = QVBoxLayout(pagina)
         cuerpo.setContentsMargins(0, 0, 0, 0)
-        cuerpo.setSpacing(16)
+        cuerpo.setSpacing(14)
 
         cabecera = QHBoxLayout()
         titulos = QVBoxLayout()
+        titulos.setSpacing(2)
         self.encabezado = QLabel('Mis frases')
         self.encabezado.setObjectName('heading')
         titulos.addWidget(self.encabezado)
-        subtitulo = QLabel('Encuentra las palabras correctas, sin empezar de cero.')
+        subtitulo = QLabel('Organiza y edita tu biblioteca')
         subtitulo.setObjectName('muted')
         titulos.addWidget(subtitulo)
         cabecera.addLayout(titulos)
@@ -380,51 +344,76 @@ class VentanaQt(QMainWindow):
         cabecera.addWidget(boton('+  Nueva frase', self.nueva, True))
         cuerpo.addLayout(cabecera)
 
-        herramientas = QHBoxLayout()
-        self.busqueda = QLineEdit()
-        self.busqueda.setPlaceholderText('Buscar por título, contenido o abreviatura…')
-        self.busqueda.textChanged.connect(self.refrescar)
-        herramientas.addWidget(self.busqueda)
-        self.filtro = QComboBox()
+        columnas = QHBoxLayout()
+        columnas.setSpacing(12)
+
+        # Estado de los filtros; se manejan desde la columna de la izquierda.
+        self.filtro = QComboBox(pagina)
         self.filtro.addItems(['Todas', 'Propias', 'Compartidas'])
         self.filtro.currentIndexChanged.connect(self.refrescar)
-        herramientas.addWidget(self.filtro)
-        self.filtro_categoria = QComboBox()
+        self.filtro.hide()
+        self.filtro_categoria = QComboBox(pagina)
         self.filtro_categoria.addItem('Todas las categorías')
         self.filtro_categoria.currentIndexChanged.connect(self.refrescar)
-        herramientas.addWidget(self.filtro_categoria)
-        cuerpo.addLayout(herramientas)
+        self.filtro_categoria.hide()
+        self.columna_filtros = ColumnaFiltros(self._filtrar_categoria, self._filtrar_origen)
+        columnas.addWidget(self.columna_filtros)
 
-        divisor = QSplitter(Qt.Horizontal)
         biblioteca = QFrame()
         biblioteca.setObjectName('panel')
+        biblioteca.setMinimumWidth(260)
+        biblioteca.setMaximumWidth(380)
         lista_layout = QVBoxLayout(biblioteca)
-        lista_layout.setContentsMargins(0, 18, 0, 10)
-        titulo_lista = QLabel('Biblioteca')
-        titulo_lista.setObjectName('section')
-        titulo_lista.setContentsMargins(20, 0, 20, 5)
-        lista_layout.addWidget(titulo_lista)
+        lista_layout.setContentsMargins(1, 12, 1, 8)
+        buscador_layout = QHBoxLayout()
+        buscador_layout.setContentsMargins(11, 0, 11, 4)
+        self.busqueda = QLineEdit()
+        self.busqueda.setPlaceholderText('Buscar…  (Ctrl+K)')
+        self.busqueda.setToolTip('Buscar por título, contenido o abreviatura')
+        self.busqueda.textChanged.connect(self.refrescar)
+        buscador_layout.addWidget(self.busqueda)
+        lista_layout.addLayout(buscador_layout)
         self.lista = QListWidget()
-        self.lista.setTextElideMode(Qt.ElideRight)
+        self.lista.setItemDelegate(DelegadoFrase(self.lista))
+        self.lista.setMouseTracking(True)
         self.lista.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.lista.currentItemChanged.connect(self.seleccionar)
         lista_layout.addWidget(self.lista)
-        divisor.addWidget(biblioteca)
+        columnas.addWidget(biblioteca, 2)
 
         editor = QFrame()
         editor.setObjectName('panel')
         campos = QVBoxLayout(editor)
         campos.setContentsMargins(22, 16, 22, 16)
-        campos.setSpacing(8)
+        campos.setSpacing(6)
         superior = QHBoxLayout()
-        titulo_editor = QLabel('Editar frase')
-        titulo_editor.setObjectName('section')
-        superior.addWidget(titulo_editor)
+        superior.setSpacing(10)
+        self.titulo_editor = QLabel('Editar frase')
+        self.titulo_editor.setObjectName('titulo_editor')
+        # Estado bajo el título: en una sola fila los botones se cortan.
+        encabezado_editor = QVBoxLayout()
+        encabezado_editor.setSpacing(3)
+        encabezado_editor.addWidget(self.titulo_editor)
+        self.origen = QLabel('')
+        self.origen.setFixedHeight(22)
+        estado_editor(self.origen, 'Propia', 'propia')
+        encabezado_editor.addWidget(self.origen, 0, Qt.AlignLeft)
+        superior.addLayout(encabezado_editor)
         superior.addStretch()
-        self.origen = QLabel('Frase propia')
-        self.origen.setObjectName('muted')
-        superior.addWidget(self.origen)
+        self.favorita = boton('', self.alternar)
+        marcar_favorita(self.favorita, False)
+        self.btn_duplicar = boton(' Duplicar', self.duplicar)
+        poner_icono(self.btn_duplicar, 'duplicar')
+        self.eliminar = boton(' Eliminar', self.eliminar_frase)
+        poner_icono(self.eliminar, 'borrar', '#dc2626')
+        superior.addWidget(barra_acciones([self.favorita, self.btn_duplicar, self.eliminar]))
         campos.addLayout(superior)
+        separador = QFrame()
+        separador.setObjectName('separador_editor')
+        separador.setFixedHeight(1)
+        campos.addSpacing(6)
+        campos.addWidget(separador)
+        campos.addSpacing(4)
 
         campos.addWidget(QLabel('Título'))
         self.titulo = QLineEdit()
@@ -439,25 +428,26 @@ class VentanaQt(QMainWindow):
         cate.addWidget(QLabel('Categoría'))
         self.categoria = QComboBox()
         cate.addWidget(self.categoria)
-        fila.addLayout(abre)
-        fila.addLayout(cate)
+        fila.addLayout(abre, 1)
+        fila.addLayout(cate, 1)
         campos.addLayout(fila)
 
         campos.addWidget(QLabel('Contenido'))
         self.contenido = QTextEdit()
-        self.contenido.setMinimumHeight(115)
+        self.contenido.setMinimumHeight(100)
         self.contenido.setAcceptRichText(False)
         self.contenido.textChanged.connect(self.previsualizar)
-        campos.addWidget(self.contenido, 2)
+        campos.addWidget(self.contenido, 1)
 
         variables = QHBoxLayout()
-        texto_vars = QLabel('VARIABLES')
+        texto_vars = QLabel('Insertar:')
         texto_vars.setObjectName('muted')
         variables.addWidget(texto_vars)
         for nombre in VARIABLES_OFICIALES[:3]:
-            variables.addWidget(boton('{' + nombre + '}', lambda checked=False, n=nombre: self.insertar_variable(n)))
+            variables.addWidget(boton('{' + nombre + '}', lambda checked=False, n=nombre: self.insertar_variable(n),
+                                      estilo='variable'))
         otras = QComboBox()
-        otras.addItems(['Otra variable…', *VARIABLES_OFICIALES[3:]])
+        otras.addItems(['Otra…', *VARIABLES_OFICIALES[3:]])
         otras.activated.connect(lambda index: (self.insertar_variable(otras.itemText(index)), otras.setCurrentIndex(0)) if index else None)
         variables.addWidget(otras)
         variables.addStretch()
@@ -478,14 +468,14 @@ class VentanaQt(QMainWindow):
         self.barra_var_repetida.hide()
         campos.addWidget(self.barra_var_repetida)
 
-        texto_preview = QLabel('VISTA PREVIA · DATOS DE EJEMPLO')
-        texto_preview.setObjectName('muted')
-        campos.addWidget(texto_preview)
+        # La vista previa solo aparece cuando la frase tiene variables.
+        self.texto_preview = QLabel('Vista previa con datos de ejemplo')
+        self.texto_preview.setObjectName('muted')
+        campos.addWidget(self.texto_preview)
         self.preview = QTextEdit()
         self.preview.setObjectName('preview')
         self.preview.setReadOnly(True)
-        self.preview.setMinimumHeight(68)
-        self.preview.setMaximumHeight(95)
+        self.preview.setFixedHeight(64)
         campos.addWidget(self.preview)
 
         # Barra inline para confirmar eliminación (reemplaza QMessageBox)
@@ -502,33 +492,36 @@ class VentanaQt(QMainWindow):
         campos.addWidget(self.confirmar_eliminacion)
 
         acciones = QHBoxLayout()
-        self.favorita = boton('Marcar favorita', self.alternar)
-        acciones.addWidget(self.favorita)
-        acciones.addWidget(boton('Duplicar', self.duplicar))
+        acciones.addWidget(boton('Completar y copiar', self.copiar))
         acciones.addStretch()
+        self.deshacer = boton('Deshacer', self.deshacer_frase, estilo='enlace')
+        acciones.addWidget(self.deshacer)
         self.guardar = boton('Guardar cambios', self.guardar_frase, True)
         acciones.addWidget(self.guardar)
+        campos.addSpacing(6)
         campos.addLayout(acciones)
-
-        secundarias = QHBoxLayout()
-        self.eliminar = boton('Eliminar propia', self.eliminar_frase)
-        secundarias.addWidget(self.eliminar)
-        self.deshacer = boton('Deshacer', self.deshacer_frase)
-        secundarias.addWidget(self.deshacer)
-        secundarias.addWidget(boton('Completar y copiar', self.copiar))
-        campos.addLayout(secundarias)
 
         campos.setSizeConstraint(QLayout.SetMinimumSize)
         editor_scroll = QScrollArea()
         editor_scroll.setWidgetResizable(True)
         editor_scroll.setFrameShape(QFrame.NoFrame)
-        editor_scroll.setMinimumWidth(570)
+        editor_scroll.setMinimumWidth(420)
         editor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         editor_scroll.setWidget(editor)
-        divisor.addWidget(editor_scroll)
-        divisor.setSizes([350, 600])
-        cuerpo.addWidget(divisor, 1)
+        columnas.addWidget(editor_scroll, 3)
+        cuerpo.addLayout(columnas, 1)
         return pagina
+
+    def _filtrar_categoria(self, nombre):
+        indice = self.filtro_categoria.findText(nombre) if nombre else 0
+        if indice == self.filtro_categoria.currentIndex():
+            self.refrescar()
+        else:
+            self.filtro_categoria.setCurrentIndex(max(indice, 0))
+
+    def _filtrar_origen(self, nombre):
+        # Pulsar de nuevo el origen activo vuelve a mostrar todos.
+        self.filtro.setCurrentText('Todas' if self.filtro.currentText() == nombre else nombre)
 
     def _ocultar_confirmaciones_editor(self):
         self.confirmar_eliminacion.hide()
@@ -568,6 +561,12 @@ class VentanaQt(QMainWindow):
         filtro = self.filtro.currentText()
         categoria_filtro = self.filtro_categoria.currentText() if self.filtro_categoria.currentIndex() > 0 else None
         frases = self.gestion.listar()
+        visibles = [f for f in frases if not self.favoritas or f.get('favorita')]
+        cantidades = {c['nombre']: 0 for c in self.gestion.repo.listar_categorias()}
+        for f in visibles:
+            nombre = f.get('categoria', 'General')
+            cantidades[nombre] = cantidades.get(nombre, 0) + 1
+        self.columna_filtros.actualizar(cantidades, len(visibles), categoria_filtro, filtro)
         if consulta:
             frases = buscar_frases(frases, consulta)
         for f in frases:
@@ -583,9 +582,6 @@ class VentanaQt(QMainWindow):
                 + f['contenido'].replace('\n', ' ')[:65] + '…\n'
                 + f['abreviatura'] + '   ·   ' + f.get('categoria', 'General') + '   ·   ' + f['origen'].capitalize()
             )
-            muestra = QPixmap(12, 12)
-            muestra.fill(QColor(f.get('color') or COLOR_DEFECTO))
-            item.setIcon(QIcon(muestra))
             item.setData(Qt.UserRole, f)
             self.lista.addItem(item)
             if f['id'] == ident:
@@ -622,8 +618,13 @@ class VentanaQt(QMainWindow):
         self.guardar.setEnabled(propia)
         self.eliminar.setEnabled(propia)
         self.favorita.setEnabled(True)
-        self.favorita.setText('Quitar favorita' if self.gestion.es_favorita(f) else 'Marcar favorita')
-        self.origen.setText('Frase propia' if propia else 'Compartida · solo lectura')
+        marcar_favorita(self.favorita, self.gestion.es_favorita(f))
+        self.btn_duplicar.setEnabled(True)
+        self.titulo_editor.setText('Editar frase' if propia else 'Ver frase')
+        if propia:
+            estado_editor(self.origen, 'Propia', 'propia')
+        else:
+            estado_editor(self.origen, 'Compartida · solo lectura', 'compartida')
 
     def nueva(self):
         self._ocultar_confirmaciones_editor()
@@ -640,13 +641,19 @@ class VentanaQt(QMainWindow):
         self.guardar.setEnabled(True)
         self.eliminar.setEnabled(False)
         self.favorita.setEnabled(False)
-        self.origen.setText('Nueva frase propia')
+        marcar_favorita(self.favorita, False)
+        self.btn_duplicar.setEnabled(False)
+        self.titulo_editor.setText('Nueva frase')
+        estado_editor(self.origen, 'Sin guardar', 'nueva')
         self.titulo.setFocus()
 
     def previsualizar(self):
         texto = self.contenido.toPlainText()
         valores = {'nombre': 'Carolina', 'pedido': '1024', 'fecha': '15/10/2026'}
         self.preview.setPlainText(sustituir(texto, valores))
+        hay_variables = bool(detectar(texto))
+        self.texto_preview.setVisible(hay_variables)
+        self.preview.setVisible(hay_variables)
 
     def insertar_variable(self, nombre):
         if self.contenido.isReadOnly():
@@ -788,8 +795,6 @@ class VentanaQt(QMainWindow):
         self.mostrar_pagina('configuracion')
 
     def _ajustes_guardados(self, cambios):
-        if getattr(cambios, 'tema', None) and cambios.tema != self.tema_actual:
-            self.aplicar_tema(cambios.tema)
         if self.al_configurar:
             self.al_configurar(cambios)
         self.estado.setText('Ajustes guardados y aplicados.')
@@ -820,18 +825,12 @@ class VentanaQt(QMainWindow):
         if self.panel_catalogo is None or not self.sesion or self.sesion.token == 'offline':
             return
         self.ocultar_aviso()
-        self.mostrar_pagina('publicar', 'retirar' if eliminar else 'publicar')
+        self.mostrar_pagina('publicar')
         self.panel_catalogo.abrir(eliminar=eliminar, frase_seleccionada=self.seleccion)
 
     def _catalogo_publicado(self, version):
         self.estado.setText(f'Publicado: versión {version}')
         self.sincronizar()
-
-    def abrir_usuarios(self):
-        if self.panel_usuarios is None:
-            return
-        self.ocultar_aviso()
-        self.mostrar_pagina('usuarios')
 
     def tiene_operacion_en_curso(self):
         return bool(

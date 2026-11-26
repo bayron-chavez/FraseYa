@@ -76,8 +76,7 @@ def test_todas_las_secciones_se_abren_en_la_misma_ventana(app):
         v.categorias_admin()
         assert v.paginas.currentWidget() is v.panel_categorias and v.nav_categorias.isChecked() and sin_dialogos_visibles()
 
-        v.abrir_usuarios()
-        assert v.paginas.currentWidget() is v.panel_usuarios and v.nav_usuarios.isChecked() and sin_dialogos_visibles()
+        assert not hasattr(v, 'nav_usuarios')
 
         v.cambiar_vista(False)
         v.copiar()
@@ -165,7 +164,8 @@ def test_publicar_y_retirar_integrados_sin_dialogos(app):
             assert len(sincronizaciones)==1
 
             v.publicar(True)
-            assert v.paginas.currentWidget() is v.panel_catalogo and v.nav_retirar.isChecked()
+            assert v.paginas.currentWidget() is v.panel_catalogo and v.nav_catalogo.isChecked()
+            assert v.panel_catalogo.btn_modo_retirar.isChecked()
             assert not v.panel_catalogo.panel_retiro.isHidden()
             limite=time.monotonic()+3
             while v.panel_catalogo.ocupada and time.monotonic()<limite: app.processEvents(); time.sleep(.01)
@@ -173,13 +173,11 @@ def test_publicar_y_retirar_integrados_sin_dialogos(app):
         v.close()
 
 
-def test_cambio_tema_barra_lateral_ajustes_y_persistencia(app, tmp_path):
+def test_interfaz_siempre_en_tema_claro_sin_control_para_cambiarlo(app, tmp_path):
     from PySide6.QtWidgets import QLabel as QtLabel
     from fraseya.aplicacion.configuracion import Configuracion
     from fraseya.infraestructura.escritor_texto import VELOCIDAD_MAX_MS, VELOCIDAD_MIN_MS
-    from fraseya.presentacion.qt_dialogos import DialogoRed
-    from fraseya.presentacion.qt_paneles import PanelAjustes
-    from fraseya.presentacion.qt_temas import ESTILO, ESTILO_OSCURO
+    from fraseya.presentacion.qt_temas import ESTILO
 
     ruta = tmp_path / 'tema_persistencia.db'
     with RepositorioSQLite(ruta) as repo:
@@ -189,59 +187,23 @@ def test_cambio_tema_barra_lateral_ajustes_y_persistencia(app, tmp_path):
         auth = Mock()
         auth.cliente.solicitar.return_value = {'nombre': 'Demo', 'servicios': '', 'horarios': '', 'procedimientos': ''}
         sesion = Sesion('admin@example.test', 'administrador', 'token')
+        # Una preferencia oscura guardada por una versión anterior se ignora.
+        Configuracion(repo).guardar({'tema': 'oscuro'})
 
         v = VentanaQt(g, demostracion=False, autenticacion=auth, sesion=sesion)
-        temas_notificados = []
-        ajustes_notificados = []
-        v.al_cambiar_tema = temas_notificados.append
-        v.al_configurar = ajustes_notificados.append
 
         assert v.panel_ajustes.velocidad.minimum() == VELOCIDAD_MIN_MS
         assert v.panel_ajustes.velocidad.maximum() == VELOCIDAD_MAX_MS
         assert v.tema_actual == 'claro'
-        assert v.btn_tema.objectName() == 'theme_toggle'
-        assert v.btn_tema.text() == 'Tema oscuro'
+        assert not hasattr(v, 'btn_tema')
+        assert not hasattr(v.panel_ajustes, 'tema')
         assert app.styleSheet() == ESTILO
         assert v.styleSheet() == ESTILO
-        assert all(lbl.textFormat() == Qt.PlainText for lbl in v.findChildren(QtLabel))
 
-        # Cambiar a oscuro desde botón rápido de la barra lateral
-        v.btn_tema.click()
-        assert v.tema_actual == 'oscuro'
-        assert v.btn_tema.text() == 'Tema claro'
-        assert app.styleSheet() == ESTILO_OSCURO
-        assert v.styleSheet() == ESTILO_OSCURO
-        assert temas_notificados[-1] == 'oscuro'
-        assert ajustes_notificados[-1].tema == 'oscuro'
-        assert Configuracion(repo).leer().tema == 'oscuro'
-
-        # Los diálogos heredan la hoja de estilo oscura activa
-        dlg = DialogoRed(v)
-        assert dlg.styleSheet() == ESTILO_OSCURO
-        dlg.close()
-        dlg.deleteLater()
-
-        panel_aj = PanelAjustes(Configuracion(repo))
-        assert panel_aj.tema.currentData() == 'oscuro'
-        panel_aj.deleteLater()
-
-        # Restablecer y guardar desde PanelAjustes vuelve a 'claro'
         v.ajustes()
-        assert v.panel_ajustes.tema.currentData() == 'oscuro'
         v.panel_ajustes.restablecer()
-        assert v.panel_ajustes.tema.currentData() == 'claro'
         assert v.panel_ajustes.guardar()
-        assert v.tema_actual == 'claro'
         assert app.styleSheet() == ESTILO
-        assert Configuracion(repo).leer().tema == 'claro'
-
-        # Cambiar a oscuro desde PanelAjustes y guardar
-        idx_oscuro = v.panel_ajustes.tema.findData('oscuro')
-        assert idx_oscuro >= 0
-        v.panel_ajustes.tema.setCurrentIndex(idx_oscuro)
-        assert v.panel_ajustes.guardar()
-        assert v.tema_actual == 'oscuro'
-        assert Configuracion(repo).leer().tema == 'oscuro'
 
         # Verificar que widgets de scroll usan scroll_content y no background:white
         v.abrir_ia()
@@ -254,16 +216,6 @@ def test_cambio_tema_barra_lateral_ajustes_y_persistencia(app, tmp_path):
         v.panel_empresa.ocupada = False
         v.trabajos.pendientes = 0
         v.close()
-
-    # Reabrir desde el mismo SQLite conserva el tema oscuro
-    with RepositorioSQLite(ruta) as repo2:
-        g2 = GestionFrases(repo2)
-        v2 = VentanaQt(g2, demostracion=True)
-        assert v2.tema_actual == 'oscuro'
-        assert v2.btn_tema.text() == 'Tema claro'
-        assert v2.styleSheet() == ESTILO_OSCURO
-        assert all(lbl.textFormat() == Qt.PlainText for lbl in v2.findChildren(QtLabel))
-        v2.close()
 
 
 def test_panel_ia_modo_vivo_toggle_demo_y_callbacks(app):
@@ -298,8 +250,7 @@ def test_panel_ia_modo_vivo_toggle_demo_y_callbacks(app):
         assert v._controlador_vivo_demo.barra.isVisible()
         assert len(v._controlador_vivo_demo.tarjetas) == 3
 
-        v.alternar_tema()
-        assert v._controlador_vivo_demo.tema == 'oscuro'
+        assert v._controlador_vivo_demo.tema == 'claro'
 
         # Usar una tarjeta demo copia al portapapeles
         v._controlador_vivo_demo.tarjetas[0].usar()

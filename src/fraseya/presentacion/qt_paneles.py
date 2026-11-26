@@ -561,10 +561,6 @@ class PanelAjustes(QWidget):
         self.intervalo.setRange(1, 1440)
         form.addRow(QLabel('Sincronización (minutos)'), self.intervalo)
 
-        self.tema = QComboBox()
-        self.tema.addItem('Claro', 'claro')
-        self.tema.addItem('Oscuro', 'oscuro')
-        form.addRow(QLabel('Tema visual'), self.tema)
         pl.addLayout(form)
 
         ayuda = QLabel('Atajo recomendado: ctrl+alt+espacio. Los cambios se aplican al instante sin reiniciar.')
@@ -587,17 +583,12 @@ class PanelAjustes(QWidget):
         raiz.addStretch(1)
         self.cargar()
 
-    def establecer_tema(self, tema):
-        indice = self.tema.findData(tema)
-        self.tema.setCurrentIndex(indice if indice >= 0 else 0)
-
     def cargar(self):
         ajustes = self.configuracion.leer()
         self.tecla.setCurrentText(ajustes.tecla_confirmacion)
         self.atajo.setText(ajustes.atajo_buscador)
         self.velocidad.setValue(ajustes.velocidad_ms)
         self.intervalo.setValue(ajustes.intervalo_sincronizacion_min)
-        self.establecer_tema(ajustes.tema)
         self.aviso.setText('')
 
     def restablecer(self):
@@ -607,7 +598,6 @@ class PanelAjustes(QWidget):
         self.atajo.setText(base.atajo_buscador)
         self.velocidad.setValue(base.velocidad_ms)
         self.intervalo.setValue(base.intervalo_sincronizacion_min)
-        self.establecer_tema(base.tema)
         self.aviso.setText('Valores predeterminados cargados. Pulsa "Guardar ajustes" para aplicarlos.')
 
     def guardar(self):
@@ -617,7 +607,6 @@ class PanelAjustes(QWidget):
                 'atajo_buscador': self.atajo.text(),
                 'velocidad_ms': self.velocidad.value(),
                 'intervalo_sincronizacion_min': self.intervalo.value(),
-                'tema': self.tema.currentData(),
             })
         except ValueError as e:
             self.aviso.setText(str(e))
@@ -954,6 +943,16 @@ class PanelCatalogo(QWidget):
         )
         raiz.addLayout(cab)
 
+        modos = QHBoxLayout()
+        self.btn_modo_publicar = boton('Publicar cambios', lambda: self.abrir(eliminar=False))
+        self.btn_modo_retirar = boton('Retirar una frase', lambda: self.abrir(eliminar=True))
+        for b in (self.btn_modo_publicar, self.btn_modo_retirar):
+            b.setObjectName('theme_toggle')
+            b.setCheckable(True)
+            modos.addWidget(b)
+        modos.addStretch()
+        raiz.addLayout(modos)
+
         self.panel_retiro = QFrame()
         self.panel_retiro.setObjectName('panel')
         prl = QVBoxLayout(self.panel_retiro)
@@ -1015,8 +1014,12 @@ class PanelCatalogo(QWidget):
     def abrir(self, eliminar=False, frase_seleccionada=None):
         if self.ocupada:
             self.aviso.setText('Ya hay una operación de catálogo en curso.')
+            self.btn_modo_publicar.setChecked(not self._modo_eliminar)
+            self.btn_modo_retirar.setChecked(self._modo_eliminar)
             return
         self._modo_eliminar = eliminar
+        self.btn_modo_publicar.setChecked(not eliminar)
+        self.btn_modo_retirar.setChecked(eliminar)
         self._vista_previa = None
         self.btn_confirmar.setEnabled(False)
         if eliminar:
@@ -1128,60 +1131,6 @@ class PanelCatalogo(QWidget):
     def detener(self):
         if self._trabajos_propios:
             self.trabajos.detener()
-
-
-class PanelUsuarios(QWidget):
-    """Guía integrada para administrar cuentas y roles en Supabase."""
-    def __init__(self, *, al_volver=None, parent=None):
-        super().__init__(parent)
-        raiz = QVBoxLayout(self)
-        raiz.setContentsMargins(0, 0, 0, 0)
-        raiz.setSpacing(16)
-
-        cab, _, _ = _cabecera_panel(
-            'Administrar usuarios',
-            'Las cuentas, contraseñas y permisos del equipo se gestionan de forma centralizada en Supabase.',
-            al_volver=al_volver,
-        )
-        raiz.addLayout(cab)
-
-        panel = QFrame()
-        panel.setObjectName('panel')
-        pl = QVBoxLayout(panel)
-        pl.setContentsMargins(28, 24, 28, 24)
-        pl.setSpacing(14)
-
-        paso1_t = QLabel('1. Altas y bajas de cuentas')
-        paso1_t.setObjectName('section')
-        pl.addWidget(paso1_t)
-        paso1 = QLabel('Abre tu proyecto en Supabase → Authentication → Users para invitar personas, restablecer contraseñas o revocar accesos.')
-        paso1.setObjectName('muted')
-        paso1.setWordWrap(True)
-        pl.addWidget(paso1)
-
-        paso2_t = QLabel('2. Roles y habilitación')
-        paso2_t.setObjectName('section')
-        pl.addWidget(paso2_t)
-        paso2 = QLabel('En Table Editor → public.fraseya_perfiles puedes activar cuentas (activo = true) y asignar el rol «usuario» o «administrador».')
-        paso2.setObjectName('muted')
-        paso2.setWordWrap(True)
-        pl.addWidget(paso2)
-
-        self.aviso = QLabel('')
-        self.aviso.setObjectName('muted')
-        pl.addWidget(self.aviso)
-
-        acciones = QHBoxLayout()
-        acciones.addWidget(boton('Copiar «fraseya_perfiles»', self._copiar))
-        acciones.addStretch()
-        pl.addLayout(acciones)
-
-        raiz.addWidget(panel)
-        raiz.addStretch(1)
-
-    def _copiar(self):
-        QApplication.clipboard().setText('fraseya_perfiles')
-        self.aviso.setText('Nombre de tabla copiado al portapapeles.')
 
 
 class FormularioVariablesQt:

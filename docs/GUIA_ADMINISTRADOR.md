@@ -25,19 +25,19 @@ del proyecto. No actives CAPTCHA sin integrar su desafío en el cliente.
 
 ## Publicar y gestionar categorías
 
-Prepara frases propias o importa Excel. «Gestionar categorías» permite crear,
+Prepara frases propias o importa Excel. «Categorías» permite crear,
 renombrar y asignar color. Eliminar solo se admite si la categoría no tiene
 frases; General se conserva. Reasigna las frases antes de eliminar categorías.
 La publicación vuelve a comprobar la categoría remota: si otra persona añadió
 frases mientras tanto, rechaza la eliminación.
 
-Pulsa «Publicar catálogo» y revisa la versión y los recuentos antes de confirmar.
+Abre «Catálogo compartido», pulsa «Publicar cambios» y revisa la versión y los recuentos antes de confirmar.
 La publicación conserva las frases que no incluiste en tu aporte, mantiene las
 categorías vacías y aplica cambios de nombres/colores. El servidor valida el rol
 actual, el hash, los límites y la versión en una transacción. Si otro administrador
 publicó primero, prepara una nueva vista previa.
 
-«Eliminar del catálogo» retira explícitamente una frase compartida tras la vista
+En «Catálogo compartido», «Retirar una frase» retira explícitamente una frase compartida tras la vista
 previa. Los usuarios la dejan de ver al sincronizar. Publicar no borra tus frases
 propias; si una abreviatura propia coincide con una compartida, la sincronización
 se rechaza conforme a la política elegida. Renombra o elimina la copia propia

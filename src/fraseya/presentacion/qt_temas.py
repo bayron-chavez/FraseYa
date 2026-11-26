@@ -1,5 +1,8 @@
 """Temas visuales (claro y oscuro) y paletas semánticas para la interfaz Qt de FraseYa."""
 from fraseya.aplicacion.configuracion import TEMA_PREDETERMINADO, TEMAS_VALIDOS
+from .identidad import recurso
+
+_FLECHA = recurso('chevron.svg').as_posix()
 
 _PALETAS = {
     'claro': {
@@ -7,8 +10,8 @@ _PALETAS = {
         'superficie': '#ffffff',
         'panel': '#ffffff',
         'tarjeta': '#f8fafc',
-        'texto': '#26364c',
-        'texto_tenue': '#78889d',
+        'texto': '#000000',
+        'texto_tenue': '#1f2937',
         'borde': '#e5eaf1',
         'primario': '#2875e8',
         'primario_hover': '#2268ce',
@@ -43,7 +46,7 @@ _PALETAS = {
 _DETALLES = {
     'claro': {
         'brand': '#246bcc',
-        'nav_group': '#8a99ad',
+        'nav_group': '#1f2937',
         'chip_fondo': '#edf4ff',
         'chip_texto': '#246bcc',
         'inline_confirm_fondo': '#fff7ed',
@@ -61,7 +64,7 @@ _DETALLES = {
         'boton_hover': '#eff5fe',
         'boton_hover_borde': '#cfe0f7',
         'boton_pressed': '#e2ecf9',
-        'boton_disabled_texto': '#aab5c4',
+        'boton_disabled_texto': '#6b7280',
         'boton_disabled_fondo': '#f4f6fa',
         'boton_disabled_borde': '#e5eaf1',
         'primario_pressed': '#1c57b0',
@@ -72,19 +75,19 @@ _DETALLES = {
         'peligro_disabled_fondo': '#fca5a5',
         'peligro_disabled_texto': '#ffffff',
         'ghost_borde': '#dfe6f0',
-        'ghost_texto': '#4b5e77',
+        'ghost_texto': '#1f2937',
         'ghost_hover_fondo': '#eff5fe',
         'ghost_hover_texto': '#246bcc',
         'ghost_disabled_texto': '#aab5c4',
-        'nav_texto': '#6c7f97',
+        'nav_texto': '#1f2937',
         'nav_hover_fondo': '#f2f6fc',
-        'nav_hover_texto': '#26364c',
+        'nav_hover_texto': '#000000',
         'nav_checked_fondo': '#edf4ff',
         'nav_checked_texto': '#246bcc',
         'nav_disabled_texto': '#b8c3d1',
         'toggle_fondo': '#f1f5f9',
         'toggle_borde': '#dfe6f0',
-        'toggle_texto': '#26364c',
+        'toggle_texto': '#000000',
         'toggle_hover_fondo': '#e6effb',
         'toggle_hover_borde': '#bfdbfe',
         'toggle_hover_texto': '#246bcc',
@@ -95,18 +98,18 @@ _DETALLES = {
         'campo_disabled_fondo': '#f4f6fa',
         'campo_disabled_texto': '#94a3b8',
         'campo_readonly_fondo': '#f8fafc',
-        'campo_readonly_texto': '#4b5e77',
+        'campo_readonly_texto': '#1f2937',
         'popup_fondo': '#ffffff',
         'popup_borde': '#dfe6f0',
-        'popup_sel_fondo': '#edf4ff',
-        'popup_sel_texto': '#246bcc',
+        'popup_sel_fondo': '#0a1f5c',
+        'popup_sel_texto': '#ffffff',
         'lista_borde_item': '#eef1f6',
         'lista_sel_fondo': '#edf4ff',
         'lista_sel_inactiva_fondo': '#f1f5fb',
-        'lista_sel_texto': '#26364c',
+        'lista_sel_texto': '#000000',
         'lista_hover_fondo': '#f7faff',
         'preview_fondo': '#f8fafc',
-        'preview_texto': '#718299',
+        'preview_texto': '#1f2937',
         'preview_borde': '#edf1f6',
         'scroll_track': '#f5f7fb',
         'scroll_handle': '#cbd5e1',
@@ -344,7 +347,7 @@ def hoja_estilo(tema: str = TEMA_PREDETERMINADO) -> str:
     clave = normalizar_tema(tema)
     c = {**_PALETAS[clave], **_DETALLES[clave]}
     return f'''
-QWidget {{font-family: 'Segoe UI'; font-size:13px; color:{c['texto']}; background:{c['fondo']};}}
+QWidget {{font-family: 'Segoe UI'; font-size:13px; font-weight:600; color:{c['texto']}; background:{c['fondo']};}}
 QMainWindow, QDialog, QMessageBox {{background:{c['fondo']}; color:{c['texto']};}}
 QStackedWidget {{background:transparent;}}
 QScrollArea {{background:transparent; border:0;}}
@@ -363,10 +366,12 @@ QLabel {{background:transparent; color:{c['texto']};}}
 QLabel#brand {{font-size:24px; font-weight:700; color:{c['brand']};}}
 QLabel#heading {{font-size:28px; font-weight:600; color:{c['texto']};}}
 QLabel#muted {{color:{c['texto_tenue']}; font-size:12px;}}
-QLabel#section {{font-weight:600; font-size:14px; color:{c['texto']};}}
+QLabel#section {{font-weight:700; font-size:14px; color:{c['texto']};}}
 QLabel#nav_group {{color:{c['nav_group']}; font-size:11px; font-weight:600; padding:8px 18px 2px 18px;}}
 QLabel#chip {{background:{c['chip_fondo']}; color:{c['chip_texto']}; border-radius:6px; padding:4px 10px; font-weight:600; font-size:12px;}}
 QCheckBox, QRadioButton {{background:transparent; color:{c['texto']};}}
+QCheckBox::indicator {{width:16px; height:16px; border:2px solid #475569; border-radius:4px; background:{c['campo_fondo']};}}
+QCheckBox::indicator:checked {{background:{c['primario']}; border:2px solid {c['primario']};}}
 QPushButton {{background:{c['boton_fondo']}; color:{c['texto']}; border:1px solid {c['boton_borde']}; border-radius:7px; padding:10px 15px;}}
 QPushButton:hover {{background:{c['boton_hover']}; border:1px solid {c['boton_hover_borde']};}}
 QPushButton:pressed {{background:{c['boton_pressed']};}}
@@ -390,13 +395,58 @@ QPushButton#theme_toggle, QPushButton#toggle_tema {{background:{c['toggle_fondo'
 QPushButton#theme_toggle:hover, QPushButton#toggle_tema:hover {{background:{c['toggle_hover_fondo']}; border:1px solid {c['toggle_hover_borde']}; color:{c['toggle_hover_texto']};}}
 QPushButton#theme_toggle:checked, QPushButton#toggle_tema:checked {{background:{c['toggle_checked_fondo']}; border:1px solid {c['toggle_checked_borde']}; color:{c['toggle_checked_texto']};}}
 QPushButton#theme_toggle:disabled, QPushButton#toggle_tema:disabled {{color:{c['boton_disabled_texto']}; background:{c['boton_disabled_fondo']}; border:1px solid {c['boton_disabled_borde']};}}
+QFrame#lateral {{background:#0a1f5c; border:0;}}
+QFrame#lateral QLabel {{background:transparent; color:#c7d5f5;}}
+QFrame#lateral QLabel#lateral_marca {{color:#ffffff; font-size:17px; font-weight:700;}}
+QFrame#lateral QLabel#lateral_tenue {{color:#a9bbe6; font-size:11px; font-weight:500;}}
+QFrame#lateral QLabel#lateral_grupo {{color:#8ea3d6; font-size:10px; font-weight:700; padding:0 12px 4px 12px;}}
+QFrame#lateral QLabel#lateral_usuario {{color:#ffffff; font-size:12px; font-weight:600;}}
+QFrame#lateral QLabel#lateral_avatar {{background:#00b8e6; color:#ffffff; border-radius:17px; font-size:12px; font-weight:700;}}
+QFrame#lateral QFrame#lateral_linea {{background:#1d3478; border:0;}}
+QFrame#lateral QFrame#lateral_tarjeta {{background:#132b6e; border:1px solid #1d3478; border-radius:10px;}}
+QFrame#lateral QLabel#lateral_punto {{font-size:13px;}}
+QFrame#lateral QPushButton#nav {{text-align:left; padding:9px 12px; font-weight:500; color:#c7d5f5; background:transparent; border:0; border-radius:8px;}}
+QFrame#lateral QPushButton#nav:hover {{background:#132b6e; color:#ffffff;}}
+QFrame#lateral QPushButton#nav:checked {{background:#2875e8; color:#ffffff; font-weight:600;}}
+QFrame#lateral QPushButton#nav:disabled {{color:#5c73ad; background:transparent;}}
+QFrame#lateral QPushButton#lateral_icono {{background:transparent; border:0; padding:0; border-radius:8px;}}
+QFrame#lateral QPushButton#lateral_icono:hover {{background:#132b6e;}}
+QWidget#pagina_frases QLabel, QWidget#pagina_frases QPushButton, QWidget#pagina_frases QLineEdit, QWidget#pagina_frases QTextEdit, QWidget#pagina_frases QComboBox {{font-weight:500;}}
+QWidget#pagina_frases QLabel#heading, QWidget#pagina_frases QLabel#section, QWidget#pagina_frases QPushButton#primary {{font-weight:700;}}
+QWidget#pagina_frases QLabel#muted {{color:#475569;}}
+QLabel#filtro_grupo {{color:#475569; font-size:11px; font-weight:700; padding:6px 10px 4px 10px;}}
+QPushButton#filtro {{text-align:left; background:transparent; border:0; border-radius:7px; padding:8px 10px; font-weight:500;}}
+QPushButton#filtro:hover {{background:{c['nav_hover_fondo']}; border:0;}}
+QPushButton#filtro:checked {{background:{c['nav_checked_fondo']}; color:{c['nav_checked_texto']}; font-weight:700;}}
+QPushButton#enlace {{background:transparent; border:0; padding:6px 8px; color:#334155;}}
+QPushButton#enlace:hover {{background:{c['nav_hover_fondo']}; border:0;}}
+QPushButton#enlace:disabled {{background:transparent; border:0; color:{c['boton_disabled_texto']};}}
+QPushButton#variable {{border-radius:14px; padding:5px 12px;}}
+QWidget#pagina_frases QLabel#titulo_editor {{font-size:18px; font-weight:700;}}
+QWidget#pagina_frases QLabel#estado_propia, QWidget#pagina_frases QLabel#estado_compartida, QWidget#pagina_frases QLabel#estado_nueva {{border-radius:11px; padding:0 11px; font-size:12px; font-weight:600;}}
+QWidget#pagina_frases QLabel#estado_propia {{background:#e8f0fe; color:#1d5fd1;}}
+QWidget#pagina_frases QLabel#estado_compartida {{background:#eef2f7; color:#334155;}}
+QWidget#pagina_frases QLabel#estado_nueva {{background:#fff4e0; color:#8a4d00;}}
+QFrame#separador_editor {{background:{c['lista_borde_item']}; border:0;}}
+QFrame#barra_acciones {{background:{c['campo_fondo']}; border:1px solid {c['campo_borde']}; border-radius:9px;}}
+QPushButton#segmento, QPushButton#segmento_peligro {{background:transparent; border:0; border-radius:0; padding:6px 8px; color:#0a1f5c;}}
+QPushButton#segmento {{border-right:1px solid {c['campo_borde']};}}
+QPushButton#segmento_peligro {{color:#dc2626;}}
+QPushButton#segmento:hover {{background:{c['nav_hover_fondo']};}}
+QPushButton#segmento_peligro:hover {{background:#fef2f2;}}
+QPushButton#segmento:disabled, QPushButton#segmento_peligro:disabled {{background:transparent; color:#a8b3c4;}}
 QDialogButtonBox QPushButton {{min-width:84px;}}
 QLineEdit, QTextEdit, QComboBox, QSpinBox {{background:{c['campo_fondo']}; color:{c['texto']}; border:1px solid {c['campo_borde']}; border-radius:7px; padding:10px; selection-background-color:{c['primario']}; selection-color:#ffffff;}}
 QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus {{border:1px solid {c['primario']};}}
 QLineEdit:disabled, QTextEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{background:{c['campo_disabled_fondo']}; color:{c['campo_disabled_texto']}; border:1px solid {c['boton_disabled_borde']};}}
 QLineEdit[readOnly="true"], QTextEdit[readOnly="true"] {{background:{c['campo_readonly_fondo']}; color:{c['campo_readonly_texto']};}}
+QComboBox {{padding-right:44px; combobox-popup:0;}}
+QComboBox::drop-down {{subcontrol-origin:padding; subcontrol-position:center right; width:26px; height:26px; right:6px; border:0; border-radius:7px; background:#0a1f5c;}}
+QComboBox::drop-down:disabled {{background:#a3acc4;}}
+QComboBox::down-arrow {{image:url("{_FLECHA}"); width:14px; height:14px;}}
 QComboBox QAbstractItemView {{background-color:{c['popup_fondo']}; color:{c['texto']}; border:1px solid {c['popup_borde']}; selection-background-color:{c['popup_sel_fondo']}; selection-color:{c['popup_sel_texto']}; outline:0; padding:4px;}}
 QComboBox QAbstractItemView::item {{padding:8px 12px; min-height:24px;}}
+QComboBox QAbstractItemView::item:selected {{background:{c['popup_sel_fondo']}; color:{c['popup_sel_texto']}; border-radius:6px;}}
 QListWidget {{background:{c['panel']}; color:{c['texto']}; border:0; outline:0;}}
 QListWidget::item {{padding:16px 18px; border-bottom:1px solid {c['lista_borde_item']}; color:{c['texto']};}}
 QListWidget::item:selected {{background:{c['lista_sel_fondo']}; color:{c['lista_sel_texto']}; border-left:3px solid {c['primario']};}}

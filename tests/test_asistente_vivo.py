@@ -1318,3 +1318,55 @@ def test_completar_hasta_tres_nunca_muta_frase_compartida():
         assert frases[0]['contenido'] == contenido_original
     finally:
         servicio.detener()
+
+
+def test_asistente_vivo_usa_variantes_reales_y_conserva_remitente():
+    recomendador = Mock()
+    recomendador.asistir.return_value = {
+        'tipo': 'generadas',
+        'sugerencias': [],
+        'opciones': [
+            {
+                'tono': 'empatica',
+                'titulo': 'Productos',
+                'categoria': 'General',
+                'contenido': '¡Hola Camila! 👋 Nuestros productos son:\n  · Producto 1\n  · Producto 2\nEsos son los productos que podemos ofrecerte.',
+                'motivo': 'Tono cálido con viñetas.',
+            },
+            {
+                'tono': 'directa',
+                'titulo': 'Productos directo',
+                'categoria': 'General',
+                'contenido': 'Nuestros productos son:\n  · Producto 1\n  · Producto 2\n¿Cuál deseas cotizar?',
+                'motivo': 'Tono directo.',
+            },
+            {
+                'tono': 'escalar',
+                'titulo': 'Productos con asesor',
+                'categoria': 'General',
+                'contenido': 'Nuestros productos son:\n  · Producto 1\n  · Producto 2\n¿Te comunicamos con un asesor?',
+                'motivo': 'Tono de acompañamiento.',
+            },
+        ],
+    }
+    servicio = ServicioAsistenteVivo(
+        recomendador=recomendador,
+        obtener_frases=lambda: [],
+        al_resultado=lambda _: None,
+        al_error=lambda _: None,
+    )
+    try:
+        assert servicio.registrar_turno('¿Qué productos tienen?', rol='cliente', chat='Camila', remitente='Camila') is True
+        mensajes = servicio.obtener_ultimos_mensajes(chat='Camila', limite=3)
+        res = servicio.analizar_mensajes(mensajes, asincrono=False)
+        assert res is not None
+        assert res.nombre_contacto == 'Camila'
+        assert len(res.opciones) == 3
+        assert res.opciones[0].frase['contenido'].startswith('¡Hola Camila! 👋')
+        assert '  · Producto 1\n  · Producto 2' in res.opciones[1].frase['contenido']
+        assert 'Con gusto te ayudamos.' not in res.opciones[0].frase['contenido']
+        assert '¿Te gustaría que un asesor te oriente?' not in res.opciones[2].frase['contenido']
+        recomendador.asistir.assert_called_once()
+        assert recomendador.asistir.call_args.kwargs['contexto']['remitente'] == 'Camila'
+    finally:
+        servicio.detener()

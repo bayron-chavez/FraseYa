@@ -449,6 +449,13 @@ class PanelEmpresa(QWidget):
             e.setAcceptRichText(False)
             e.setMinimumHeight(75)
             e.setMaximumHeight(120)
+            placeholders = {
+                'nombre': 'Nombre comercial de tu empresa',
+                'servicios': 'Lista tus productos o servicios principales con precios referenciales y plazos.',
+                'horarios': 'Días y horarios de atención al cliente (ej. Lun–Vie 09:00 a 18:00).',
+                'procedimientos': 'Reglas de atención, tono preferido (tú/usted), uso de emojis y políticas de cambio o escalamiento.',
+            }
+            e.setPlaceholderText(placeholders.get(k, ''))
             e.textChanged.connect(lambda clave=k, lim=maximo: self._actualizar_contador(clave, lim))
             self.campos[k] = e
             self._contadores[k] = contador

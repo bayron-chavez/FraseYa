@@ -94,7 +94,7 @@ function crearBurbuja(panel, { tipo = 'in', dataId, texto, citado = null, remite
   return b;
 }
 
-test('extension_wsp/content.js ignora citas, respeta ventana reciente y agrupa ráfagas con debounce', async () => {
+test('extension_wsp/content.js preserva citas breves, respeta ventana reciente y agrupa ráfagas con debounce', async () => {
   const codigo = await readFile(RUTA_SCRIPT, 'utf8');
   const root = new FakeElement('body');
   const main = new FakeElement('div', { attrs: { id: 'main' }, parent: root });
@@ -157,14 +157,13 @@ test('extension_wsp/content.js ignora citas, respeta ventana reciente y agrupa r
 
   vm.runInNewContext(codigo, sandbox);
 
-  // 1. Al iniciar envía historial inicial omitiendo el texto dentro de quoted-message
+  // 1. Al iniciar envía historial inicial incluyendo la referencia breve al mensaje citado
   assert.equal(envios.length, 1);
   assert.equal(envios[0].url, 'http://127.0.0.1:47821/mensaje');
   assert.deepEqual(envios[0].body.turnos, [
-    { rol: 'cliente', texto: 'Hola, buen día' },
+    { rol: 'cliente', texto: '[Respondiendo a: "Mensaje citado viejo"]\nHola, buen día' },
     { rol: 'agente', texto: 'Hola Camila, ¿en qué te ayudamos?' },
   ]);
-  assert.ok(!JSON.stringify(envios[0].body).includes('Mensaje citado viejo'));
 
   // 2. Inserta burbuja antigua al inicio de 10 mensajes -> fuera de los últimos 5 (scroll arriba), se ignora
   const observadorPanel = observers[0];

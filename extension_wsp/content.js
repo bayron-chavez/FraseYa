@@ -77,7 +77,23 @@
     return chat;
   }
 
+  function extraerCita(nodoMensaje) {
+    const citado = nodoMensaje.querySelector('[data-testid="quoted-message"]');
+    if (!citado) return '';
+    const spans = citado.querySelectorAll('span.selectable-text');
+    const textos = [];
+    for (const sp of spans) {
+      const t = limpiarTexto(sp.innerText || '');
+      if (t && !textos.includes(t)) textos.push(t);
+    }
+    const txt = textos.join(' ') || limpiarTexto(citado.innerText || '');
+    if (!txt) return '';
+    return txt.replace(/\s+/g, ' ').slice(0, 140).trim();
+  }
+
   function extraerTextoPlano(nodoMensaje) {
+    const cita = extraerCita(nodoMensaje);
+    const prefijoCita = cita ? `[Respondiendo a: "${cita}"]\n` : '';
     // Selectores estables para el cuerpo textual de la burbuja.
     const bloques = nodoMensaje.querySelectorAll(
       '[data-testid="msg-container"] span.selectable-text, .copyable-text span.selectable-text, span.selectable-text'
@@ -92,12 +108,12 @@
         }
       }
       const unido = partes.join('\n').trim();
-      if (unido) return unido.slice(0, MAX_LARGO);
+      if (unido) return `${prefijoCita}${unido}`.slice(0, MAX_LARGO);
     }
 
     const contenedor = nodoMensaje.querySelector('.copyable-text');
     if (contenedor && contenedor.innerText) {
-      return limpiarTexto(contenedor.innerText).slice(0, MAX_LARGO);
+      return `${prefijoCita}${limpiarTexto(contenedor.innerText)}`.slice(0, MAX_LARGO);
     }
     return '';
   }

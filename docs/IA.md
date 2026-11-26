@@ -5,7 +5,7 @@ FraseYa ofrece dos modalidades asistidas por Gemini (siempre bajo control del op
 1. **Panel manual («Sugerir respuesta · IA»):** el usuario pega voluntariamente el mensaje o hilo del cliente.
 2. **Asistente en vivo opcional (barra flotante):** cuando el usuario lo activa explícitamente en sesión conectada, observa únicamente la ventana activa de WhatsApp Desktop (vía Windows UI Automation, solo texto en memoria) o pestañas de WhatsApp Web (con la extensión local opcional en `127.0.0.1:47821`). Al pulsar **«Leer últimos 3»** o **«Portapapeles»**, propone hasta 3 opciones de respuesta.
 
-En ambos flujos, Gemini recomienda hasta tres frases existentes; si no hay coincidencia suficiente (o faltan variantes adaptadas), solicita generar una plantilla reutilizable. Cuando el usuario inserta o edita desde el asistente en vivo, **nunca modifica ni muta frases compartidas existentes**: las variantes reescritas se etiquetan como borradores efímeros en memoria (`borrador_ia`) y el guardado desde el panel manual genera únicamente una frase propia con abreviatura libre (`!ia`, `!ia2`, etc.), sin publicar en el catálogo compartido.
+En ambos flujos, Gemini recomienda hasta tres frases existentes o, mediante el modo unificado `asistir` del asistente en vivo, evalúa el catálogo y genera directamente hasta 3 variantes reales diferenciadas por tono (`Empática`, `Directa` y `Escalar`) en una sola consulta. Permite emojis sobrios y moderados cuando el cliente no está molesto, y formatea las enumeraciones de productos o servicios en líneas separadas con viñetas (`  · `). Cuando el usuario inserta o edita desde el asistente en vivo, **nunca modifica ni muta frases compartidas existentes**: las variantes reescritas se etiquetan como borradores efímeros en memoria (`borrador_ia`) y el guardado desde el panel manual genera únicamente una frase propia con abreviatura libre (`!ia`, `!ia2`, etc.), sin publicar en el catálogo compartido.
 
 La instrucción de generación pide sustituir datos personales y de transacciones por variables oficiales cuando corresponda, y evitar inventar precios o políticas. Esto depende del modelo y no garantiza anonimización completa: revisa la plantilla antes de enviarla o guardarla. Las respuestas con campos inesperados o variables inválidas se rechazan. Una generación idéntica a una frase propia existente reutiliza esa frase.
 
@@ -16,7 +16,7 @@ La selección exige pertinencia para la necesidad concreta y tono profesional; l
 1. Aplicar `supabase/migrations/202610100003_ia.sql` en el SQL Editor.
 2. Desplegar `supabase/functions/fraseya-ia`. La configuración `verify_jwt = false` sustituye la verificación antigua del gateway por una consulta a Supabase Auth dentro de la función, seguida de la comprobación del perfil activo.
 3. En Edge Functions → Secrets, guardar `GEMINI_API_KEY`. Nunca guardar esa clave en el repositorio, la aplicación ni el instalador.
-4. Opcionalmente guardar `GEMINI_MODEL`; el valor predeterminado es `gemini-3.5-flash-lite`. La disponibilidad y cuota dependen de la cuenta de Google.
+4. Opcionalmente guardar `GEMINI_MODEL`; el valor predeterminado es `gemini-3.8-flash`. La disponibilidad y cuota dependen de la cuenta de Google.
 5. Iniciar sesión en FraseYa, guardar frases y solicitar una recomendación con un mensaje de prueba sin datos personales.
 
 ## Perfil de empresa y conversación

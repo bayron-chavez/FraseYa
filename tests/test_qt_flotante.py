@@ -722,3 +722,32 @@ def test_edicion_tarjeta_inserta_variables_app_y_abre_formulario_inline(app):
         app.processEvents()
 
 
+def test_tarjeta_prefilla_nombre_contacto_y_conserva_vinetas_y_emojis(app):
+    usados = []
+    ctrl = ControladorFlotanteQt(al_usar=lambda frase, texto: usados.append((frase, texto)))
+    try:
+        contenido = '¡Hola {nombre}! 👋 Nuestros productos son:\n  · Producto 1\n  · Producto 2'
+        ctrl.mostrar_sugerencias({
+            'tema': 'Consulta',
+            'animo': 'Neutral',
+            'urgencia': 'Normal',
+            'nombre_contacto': 'Yaimara',
+            'opciones': [
+                {'indice': 1, 'tono': 'empatica', 'frase': {'id': -1, 'contenido': contenido}, 'motivo': 'Lista'},
+            ],
+        })
+        app.processEvents()
+        tarjeta = ctrl.tarjetas[0]
+        tarjeta.btn_usar.click()
+        app.processEvents()
+        assert tarjeta.en_variables is True
+        assert tarjeta._campos_variables['nombre'].text() == 'Yaimara'
+        tarjeta.btn_insertar_variables.click()
+        app.processEvents()
+        assert len(usados) == 1
+        assert usados[0][1] == '¡Hola Yaimara! 👋 Nuestros productos son:\n  · Producto 1\n  · Producto 2'
+    finally:
+        ctrl.detener()
+        app.processEvents()
+
+

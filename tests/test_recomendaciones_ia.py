@@ -69,3 +69,62 @@ def test_preparar_conserva_turnos_cliente_agente_en_mensaje():
     pedido, _ = preparar(hilo, catalogo)
     assert pedido['mensaje'] == hilo
     assert pedido['frases'][0]['id'] == 1
+
+
+def test_preranking_ignora_stopwords_usa_sinonimos_y_prioriza_ultimo_cliente():
+    catalogo = [
+        {'id': 10, 'titulo': 'Saludo general', 'abreviatura': '!hola', 'categoria': 'General', 'contenido': 'Hola buenos días, con mucho gusto'},
+        {'id': 11, 'titulo': 'Tarifas y planes', 'abreviatura': '!tarifas', 'categoria': 'Ventas', 'contenido': 'Nuestros valores y costos vigentes de servicios'},
+        {'id': 12, 'titulo': 'Soporte previo', 'abreviatura': '!sop', 'categoria': 'Soporte', 'contenido': 'Reinicia tu router wifi para verificar conexión'},
+    ]
+    hilo = 'Cliente: Tengo internet lento\nAgente: Prueba reiniciar tu router\nCliente: ¿Cuál es el precio de sus planes?'
+    pedido, _ = preparar(hilo, catalogo)
+    assert pedido['frases'][0]['id'] == 11
+
+
+def test_asistir_valida_variantes_reales_y_hace_fallback_si_servidor_es_antiguo():
+    cliente = Mock()
+    cliente.solicitar.return_value = {
+        'tipo': 'generadas',
+        'sugerencias': [],
+        'opciones': [
+            {
+                'tono': 'empatica',
+                'titulo': 'Catálogo productos',
+                'categoria': 'Ventas',
+                'contenido': '¡Hola Camila! 👋 Nuestros productos son:\n  · Producto 1\n  · Producto 2\nEsos son los productos que podemos ofrecerte.',
+                'motivo': 'Presentación cercana con viñetas.',
+            },
+            {
+                'tono': 'directa',
+                'titulo': 'Lista directa',
+                'categoria': 'Ventas',
+                'contenido': 'Nuestros productos son:\n  · Producto 1\n  · Producto 2\n¿Cuál te interesa?',
+                'motivo': 'Respuesta directa.',
+            },
+            {
+                'tono': 'escalar',
+                'titulo': 'Asesoría comercial',
+                'categoria': 'Ventas',
+                'contenido': 'Nuestros productos son:\n  · Producto 1\n  · Producto 2\n¿Te contacto con un asesor?',
+                'motivo': 'Ofrece apoyo comercial.',
+            },
+        ],
+    }
+    servicio = RecomendadorIA(cliente)
+    res = servicio.asistir('¿Qué productos tienen?', frases(), contexto={'animo': 'Neutral', 'remitente': 'Camila'})
+    assert res['tipo'] == 'generadas'
+    assert len(res['opciones']) == 3
+    enviado = cliente.solicitar.call_args.args[2]
+    assert enviado['modo'] == 'asistir'
+    assert enviado['contexto']['remitente'] == 'Camila'
+
+    # Fallback ante servidor antiguo (HTTP 400 al enviar modo='asistir')
+    cliente_antiguo = Mock()
+    cliente_antiguo.solicitar.side_effect = [
+        ErrorSupabase('Mensaje o frases inválidos.', 400),
+        {'sugerencias': [{'id': 1, 'motivo': 'Coincide con entrega.'}]},
+    ]
+    res_fb = RecomendadorIA(cliente_antiguo).asistir('¿Dónde está mi pedido?', frases())
+    assert res_fb['tipo'] == 'catalogo'
+    assert res_fb['sugerencias'][0].frase['id'] == 1

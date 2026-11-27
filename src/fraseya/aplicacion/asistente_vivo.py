@@ -13,7 +13,10 @@ import re
 import threading
 
 from fraseya.aplicacion.buscador import normalizar
-from fraseya.aplicacion.recomendaciones_ia import rankear_frases_relevantes
+from fraseya.aplicacion.recomendaciones_ia import (
+    frases_relevantes_con_puntaje,
+    rankear_frases_relevantes,
+)
 
 MAX_LARGO_MENSAJE = 4000
 MAX_OPCIONES_VIVO = 3
@@ -110,6 +113,7 @@ class ResultadoVivo:
     urgencia: str
     opciones: tuple[OpcionFlotante, ...]
     mensaje_origen: str
+    nombre_contacto: str = ''
 
 
 def _contiene_termino(texto_norm: str, termino: str) -> bool:
@@ -321,6 +325,61 @@ def _construir_tres_borradores_ia(
     return tuple(opciones)
 
 
+def _construir_opciones_ia(
+    opciones_ia: list[dict],
+    animo: str = 'Neutral',
+    es_primer_contacto_chat: bool = True,
+) -> tuple[OpcionFlotante, ...]:
+    """Convierte las variantes reales devueltas por Gemini en OpcionFlotante (con respaldo si llega solo 1)."""
+    if len(opciones_ia) == 1:
+        return _construir_tres_borradores_ia(
+            opciones_ia[0],
+            animo=animo,
+            es_primer_contacto_chat=es_primer_contacto_chat,
+        )
+    nombres_tono = dict(TONOS_OPCION)
+    por_tono = {op.get('tono'): op for op in opciones_ia if isinstance(op, dict)}
+    ordenadas = [por_tono[t] for t, _ in TONOS_OPCION if t in por_tono]
+    for op in opciones_ia:
+        if isinstance(op, dict) and op not in ordenadas:
+            ordenadas.append(op)
+    opciones: list[OpcionFlotante] = []
+    for idx, op in enumerate(ordenadas[:MAX_OPCIONES_VIVO], start=1):
+        tono = op.get('tono') if op.get('tono') in nombres_tono else TONOS_OPCION[idx - 1][0]
+        nombre_tono = nombres_tono[tono]
+        contenido = str(op.get('contenido') or '').strip()[:MAX_LARGO_MENSAJE]
+        if not contenido:
+            continue
+        frase_borrador = {
+            'id': -idx,
+            'titulo': str(op.get('titulo') or 'Propuesta IA').strip()[:200],
+            'categoria': str(op.get('categoria') or 'General').strip()[:200],
+            'contenido': contenido,
+            'origen': 'borrador_ia',
+        }
+        motivo = str(op.get('motivo') or f'Borrador IA en tono {nombre_tono.lower()}.').strip()[:240]
+        opciones.append(OpcionFlotante(
+            indice=idx,
+            etiqueta=f'Propuesta IA · Revisar ({nombre_tono})',
+            tono=tono,
+            frase=frase_borrador,
+            motivo=motivo,
+        ))
+    return tuple(opciones)
+
+
+def _soporta_asistir(recomendador) -> bool:
+    """Detecta si el recomendador implementa `asistir` (sin activar atributos mágicos de Mock)."""
+    if recomendador is None:
+        return False
+    hijos_mock = getattr(recomendador, '_mock_children', None)
+    if isinstance(hijos_mock, dict):
+        return 'asistir' in hijos_mock and callable(hijos_mock['asistir'])
+    return callable(getattr(type(recomendador), 'asistir', None)) or (
+        'asistir' in getattr(recomendador, '__dict__', {}) and callable(recomendador.asistir)
+    )
+
+
 def crear_resultado_demo(frases: list[dict]) -> ResultadoVivo:
     """Construye un ResultadoVivo realista para probar las tarjetas flotantes al instante."""
     mensaje_demo = 'Hola, mi pedido #4821 lleva 3 días de retraso y lo necesito urgente para hoy.'
@@ -418,6 +477,7 @@ class ServicioAsistenteVivo:
         self._epoca: int = 0
         self._detenido: bool = False
         self._buffer_mensajes: dict[str, deque[str]] = {}
+        self._remitentes_chat: dict[str, str] = {}
         self._ultimo_chat_buffer: str = ''
 
     def activar(self) -> None:
@@ -436,6 +496,7 @@ class ServicioAsistenteVivo:
             self._detenido = True
             self._epoca += 1
             self._buffer_mensajes.clear()
+            self._remitentes_chat.clear()
             self._ultimo_chat_buffer = ''
 
     def _cola_chat_locked(self, clave_chat: str) -> deque[str]:
@@ -444,6 +505,7 @@ class ServicioAsistenteVivo:
             if len(self._buffer_mensajes) >= _MAX_CHATS_MEMORIA:
                 mas_antiguo = next(iter(self._buffer_mensajes))
                 self._buffer_mensajes.pop(mas_antiguo, None)
+                self._remitentes_chat.pop(mas_antiguo, None)
             cola = deque(maxlen=8)
             self._buffer_mensajes[clave_chat] = cola
         return cola
@@ -454,6 +516,7 @@ class ServicioAsistenteVivo:
         rol: str = 'cliente',
         chat: str = '',
         turnos: list[dict] | None = None,
+        remitente: str = '',
     ) -> bool:
         """Guarda turnos recientes ('Cliente:' / 'Agente:') en el búfer efímero en memoria."""
         rol_norm = 'agente' if str(rol or '').strip().casefold() == 'agente' else 'cliente'
@@ -480,6 +543,7 @@ class ServicioAsistenteVivo:
             entradas = [f'{pref}: {limpio}'[:MAX_LARGO_MENSAJE]]
 
         clave_chat = (chat or '').strip().casefold()
+        remitente_limpio = str(remitente or '').strip()[:120]
         with self._candado:
             if self._detenido:
                 return False
@@ -491,23 +555,35 @@ class ServicioAsistenteVivo:
                 etiquetado = entradas[0]
                 if not cola or _huella(cola[-1]) != _huella(etiquetado):
                     cola.append(etiquetado)
+            if remitente_limpio:
+                self._remitentes_chat[clave_chat] = remitente_limpio
             self._ultimo_chat_buffer = clave_chat
         return True
 
-    def registrar_mensaje_entrante(self, texto: str, chat: str = '') -> bool:
+    def registrar_mensaje_entrante(self, texto: str, chat: str = '', remitente: str = '') -> bool:
         """Guarda un mensaje entrante en el búfer efímero en memoria (sin llamar a la IA)."""
         limpio = _limpiar_texto(texto)
         if not limpio or len(limpio) > MAX_LARGO_MENSAJE:
             return False
         clave_chat = (chat or '').strip().casefold()
+        remitente_limpio = str(remitente or '').strip()[:120]
         with self._candado:
             if self._detenido:
                 return False
             cola = self._cola_chat_locked(clave_chat)
             if not cola or _huella(cola[-1]) != _huella(limpio):
                 cola.append(limpio)
+            if remitente_limpio:
+                self._remitentes_chat[clave_chat] = remitente_limpio
             self._ultimo_chat_buffer = clave_chat
         return True
+
+    def obtener_remitente(self, chat: str = '') -> str:
+        """Devuelve el nombre de contacto en memoria para el chat indicado (o el último activo)."""
+        clave_pedida = (chat or '').strip().casefold()
+        with self._candado:
+            clave = clave_pedida if clave_pedida else self._ultimo_chat_buffer
+            return self._remitentes_chat.get(clave, '')
 
     def obtener_ultimos_mensajes(self, chat: str = '', limite: int = 3) -> list[str]:
         """Devuelve hasta `limite` últimos mensajes del búfer en memoria."""
@@ -574,14 +650,14 @@ class ServicioAsistenteVivo:
             return None
 
         if asincrono:
-            return self._lanzar_hilo_consulta(limpio, epoca=epoca)
-        return self._ejecutar_consulta(limpio, epoca=epoca)
+            return self._lanzar_hilo_consulta(limpio, epoca=epoca, incluir_remitente=False)
+        return self._ejecutar_consulta(limpio, epoca=epoca, incluir_remitente=False)
 
-    def _lanzar_hilo_consulta(self, texto: str, *, epoca: int) -> threading.Thread:
+    def _lanzar_hilo_consulta(self, texto: str, *, epoca: int, incluir_remitente: bool = True) -> threading.Thread:
         hilo = threading.Thread(
             target=self._ejecutar_consulta,
             args=(texto,),
-            kwargs={'epoca': epoca},
+            kwargs={'epoca': epoca, 'incluir_remitente': incluir_remitente},
             name='fraseya-asistente-vivo',
             daemon=True,
         )
@@ -616,6 +692,7 @@ class ServicioAsistenteVivo:
         *,
         texto_busqueda: str | None = None,
         es_primer_contacto_chat: bool = True,
+        permitir_generar: bool = True,
     ) -> tuple[OpcionFlotante, ...]:
         """Completa 1 o 2 opciones hasta 3 con a lo sumo 1 llamada IA y/o catálogo relevante.
 
@@ -629,7 +706,7 @@ class ServicioAsistenteVivo:
         usados_id = {op.frase.get('id') for op in lista if op.frase.get('id') is not None}
         usados_txt = {_huella(str(op.frase.get('contenido') or '')) for op in lista}
 
-        generada, _err = self._generar_borrador_crudo(texto, frases)
+        generada, _err = self._generar_borrador_crudo(texto, frases) if permitir_generar else (None, None)
         if generada is not None and len(lista) < MAX_OPCIONES_VIVO:
             idx = len(lista) + 1
             tono, nombre_tono = TONOS_OPCION[idx - 1]
@@ -679,8 +756,8 @@ class ServicioAsistenteVivo:
                     usados_txt.add(_huella(variante_gen))
 
         if len(lista) < MAX_OPCIONES_VIVO:
-            for cand in rankear_frases_relevantes(texto_busqueda or texto, frases):
-                if len(lista) >= MAX_OPCIONES_VIVO:
+            for puntaje, cand in frases_relevantes_con_puntaje(texto_busqueda or texto, frases):
+                if puntaje <= 0 or len(lista) >= MAX_OPCIONES_VIVO:
                     break
                 cid = cand.get('id')
                 ctxt = str(cand.get('contenido') or '').strip()
@@ -732,7 +809,13 @@ class ServicioAsistenteVivo:
 
         return tuple(lista[:MAX_OPCIONES_VIVO])
 
-    def _ejecutar_consulta(self, texto: str, *, epoca: int) -> ResultadoVivo | None:
+    def _ejecutar_consulta(
+        self,
+        texto: str,
+        *,
+        epoca: int,
+        incluir_remitente: bool = True,
+    ) -> ResultadoVivo | None:
         try:
             frases = list(self._obtener_frases() or [])
             if not self._puede_emitir(epoca):
@@ -740,47 +823,84 @@ class ServicioAsistenteVivo:
             primer_contacto = es_primer_contacto(texto)
             texto_cliente = extraer_texto_cliente(texto)
             tema, animo, urgencia = clasificar_contexto(texto_cliente)
+            nombre_contacto = self.obtener_remitente() if incluir_remitente else ''
             self._notificar_analizando(texto_cliente)
 
-            compuesta = es_consulta_compuesta(texto)
-            sugerencias = (
-                self._recomendador.sugerir(texto, frases)
-                if (frases and not compuesta) else []
-            )
-            if not self._puede_emitir(epoca):
-                return None
-
-            if sugerencias:
-                opciones_base = _envolver_sugerencias(sugerencias)
-                opciones = self._completar_hasta_tres(
-                    opciones_base,
-                    texto,
-                    frases,
-                    animo,
-                    texto_busqueda=texto_cliente,
-                    es_primer_contacto_chat=primer_contacto,
-                )
+            if _soporta_asistir(self._recomendador):
+                contexto_ia = {
+                    'tema': tema,
+                    'animo': animo,
+                    'urgencia': urgencia,
+                    'primer_contacto': primer_contacto,
+                }
+                if nombre_contacto:
+                    contexto_ia['remitente'] = nombre_contacto
+                respuesta = self._recomendador.asistir(texto, frases, contexto=contexto_ia)
                 if not self._puede_emitir(epoca):
+                    return None
+                if not isinstance(respuesta, dict):
+                    self._notificar_error('La IA devolvió una respuesta inválida.')
+                    return None
+                if respuesta.get('tipo') == 'catalogo' and respuesta.get('sugerencias'):
+                    opciones_base = _envolver_sugerencias(respuesta['sugerencias'])
+                    opciones = self._completar_hasta_tres(
+                        opciones_base,
+                        texto,
+                        frases,
+                        animo,
+                        texto_busqueda=texto_cliente,
+                        es_primer_contacto_chat=primer_contacto,
+                        permitir_generar=False,
+                    )
+                elif respuesta.get('tipo') == 'generadas' and respuesta.get('opciones'):
+                    opciones = _construir_opciones_ia(
+                        respuesta['opciones'],
+                        animo=animo,
+                        es_primer_contacto_chat=primer_contacto,
+                    )
+                else:
+                    self._notificar_error('No se pudieron obtener sugerencias de IA.')
                     return None
             else:
-                generada, error_gen = self._generar_borrador_crudo(texto, frases)
+                compuesta = es_consulta_compuesta(texto)
+                sugerencias = (
+                    self._recomendador.sugerir(texto, frases)
+                    if (frases and not compuesta) else []
+                )
                 if not self._puede_emitir(epoca):
                     return None
-                if generada is None:
-                    if error_gen:
-                        self._notificar_error(
-                            f'Sin coincidencias en el catálogo y la IA no respondió: {error_gen}'
-                        )
-                    else:
-                        self._notificar_error(
-                            'Sin coincidencias en el catálogo de frases aprobadas para este mensaje.'
-                        )
-                    return None
-                opciones = _construir_tres_borradores_ia(
-                    generada,
-                    animo=animo,
-                    es_primer_contacto_chat=primer_contacto,
-                )
+
+                if sugerencias:
+                    opciones_base = _envolver_sugerencias(sugerencias)
+                    opciones = self._completar_hasta_tres(
+                        opciones_base,
+                        texto,
+                        frases,
+                        animo,
+                        texto_busqueda=texto_cliente,
+                        es_primer_contacto_chat=primer_contacto,
+                    )
+                    if not self._puede_emitir(epoca):
+                        return None
+                else:
+                    generada, error_gen = self._generar_borrador_crudo(texto, frases)
+                    if not self._puede_emitir(epoca):
+                        return None
+                    if generada is None:
+                        if error_gen:
+                            self._notificar_error(
+                                f'Sin coincidencias en el catálogo y la IA no respondió: {error_gen}'
+                            )
+                        else:
+                            self._notificar_error(
+                                'Sin coincidencias en el catálogo de frases aprobadas para este mensaje.'
+                            )
+                        return None
+                    opciones = _construir_tres_borradores_ia(
+                        generada,
+                        animo=animo,
+                        es_primer_contacto_chat=primer_contacto,
+                    )
 
             resultado = ResultadoVivo(
                 tema=tema,
@@ -788,6 +908,7 @@ class ServicioAsistenteVivo:
                 urgencia=urgencia,
                 opciones=opciones,
                 mensaje_origen=texto,
+                nombre_contacto=nombre_contacto,
             )
             self._notificar_resultado(resultado)
             return resultado

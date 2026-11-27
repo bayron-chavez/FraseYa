@@ -29,8 +29,8 @@ test('Generación exige sesión y devuelve plantilla sin publicar', async()=>{
   assert.equal(llamadas.length,5);
   assert(!llamadas.some(l=>l.url.includes('publicar')));
   const datos=JSON.parse(JSON.parse(llamadas.at(-1).init.body).contents[0].parts[0].text);
-  assert.equal(datos.empresa.nombre,'Empresa de prueba');
-  assert.equal(datos.empresa.procedimientos,'Consultar tipo de conexión');
+  assert.equal(datos.perfil_empresa.nombre,'Empresa de prueba');
+  assert.equal(datos.perfil_empresa.procedimientos,'Consultar tipo de conexión');
 });
 test('Perfil empresarial no disponible bloquea proveedor', async()=>{
   const base=transporte();
@@ -81,13 +81,58 @@ test('Prompts prohíben repetir saludo cuando ya existe turno de Agente',async()
   assert.equal(rGen.status,200);
   const bodyGen=JSON.parse(gen.llamadas.at(-1).init.body);
   assert.match(bodyGen.systemInstruction.parts[0].text,/NO vuelvas a saludar/);
-  assert.equal(JSON.parse(bodyGen.contents[0].parts[0].text).mensaje,hilo);
+  assert.equal(JSON.parse(bodyGen.contents[0].parts[0].text).conversacion,hilo);
 
   const sug=transporte();
   const rSug=await crearHandler(env,sug.f)(request({...pedido,mensaje:hilo}));
   assert.equal(rSug.status,200);
   const bodySug=JSON.parse(sug.llamadas.at(-1).init.body);
-  assert.match(bodySug.systemInstruction.parts[0].text,/NO exijas \{nombre\}/);
-  assert.match(bodySug.systemInstruction.parts[0].text,/cubre TODOS esos puntos juntos/);
-  assert.match(bodyGen.systemInstruction.parts[0].text,/respuesta unificada/);
+  assert.doesNotMatch(bodySug.systemInstruction.parts[0].text,/exige además que la frase incluya \{nombre\}/);
+  assert.match(bodySug.systemInstruction.parts[0].text,/NO descartes una frase útil/);
+  assert.match(bodySug.systemInstruction.parts[0].text,/cubre todo junto/);
+  assert.match(bodyGen.systemInstruction.parts[0].text,/  · Producto 1/);
+  assert.match(bodyGen.systemInstruction.parts[0].text,/Emojis:/);
+});
+
+test('Modo asistir devuelve 3 variantes reales con viñetas, emojis y valida contexto e inyecciones', async()=>{
+  const salidaAsistir={
+    tipo:'generadas',
+    sugerencias:[],
+    opciones:[
+      {tono:'empatica',titulo:'Catálogo productos',categoria:'Ventas',contenido:'¡Hola Camila! 👋 Nuestros productos son:\n  · Producto 1\n  · Producto 2\nEsos son los productos que podemos ofrecerte. ¿Cuál te interesa?',motivo:'Presenta el catálogo de forma cálida.'},
+      {tono:'directa',titulo:'Lista productos',categoria:'Ventas',contenido:'Nuestros productos son:\n  · Producto 1\n  · Producto 2\nEsos son los productos que podemos ofrecerte.',motivo:'Lista clara y concisa.'},
+      {tono:'escalar',titulo:'Asesoría productos',categoria:'Ventas',contenido:'Nuestros productos son:\n  · Producto 1\n  · Producto 2\n¿Te gustaría que un asesor te ayude a elegir?',motivo:'Ofrece acompañamiento.'},
+    ],
+  };
+  const {f,llamadas}=transporte({salida:salidaAsistir});
+  const r=await crearHandler(env,f)(request({
+    ...pedido,
+    mensaje:'¿Qué productos tienen?',
+    modo:'asistir',
+    contexto:{tema:'Consulta general',animo:'Neutral',urgencia:'Normal',primer_contacto:true,remitente:'Camila'},
+  }));
+  assert.equal(r.status,200);
+  const res=await r.json();
+  assert.equal(res.tipo,'generadas');
+  assert.equal(res.opciones.length,3);
+  const geminiReq=JSON.parse(llamadas.at(-1).init.body);
+  const carga=JSON.parse(geminiReq.contents[0].parts[0].text);
+  assert.equal(carga.estado_chat.remitente,'Camila');
+  assert.equal(carga.ultimo_mensaje_cliente,'¿Qué productos tienen?');
+  assert.match(llamadas.at(-1).url,/models\/gemini-3\.8-flash:generateContent$/);
+  assert.equal(geminiReq.generationConfig.temperature,0.45);
+  assert.equal(geminiReq.generationConfig.maxOutputTokens,4096);
+
+  // Rechaza variante con tono duplicado o variable inválida
+  const bad=transporte({salida:{
+    tipo:'generadas',sugerencias:[],
+    opciones:[
+      {...salidaAsistir.opciones[0]},
+      {...salidaAsistir.opciones[1],tono:'empatica'},
+    ],
+  }});
+  assert.equal((await crearHandler(env,bad.f)(request({...pedido,modo:'asistir'}))).status,502);
+
+  // Rechaza contexto malicioso con claves extra
+  assert.equal((await crearHandler(env,f)(request({...pedido,modo:'asistir',contexto:{rol:'admin'}}))).status,400);
 });

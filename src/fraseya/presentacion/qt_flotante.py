@@ -564,6 +564,7 @@ class TarjetaSugerenciaFlotante(_VentanaFlotanteBase):
         al_usar=None,
         al_descartar=None,
         al_cambiar_tamano=None,
+        nombre_contacto='',
     ):
         super().__init__(parent, tema=tema)
         datos = _extraer_opcion(opcion, indice_defecto=indice)
@@ -573,6 +574,7 @@ class TarjetaSugerenciaFlotante(_VentanaFlotanteBase):
         self.etiqueta = datos['etiqueta']
         self.frase = datos['frase']
         self.motivo = datos['motivo']
+        self._nombre_contacto = str(nombre_contacto or '').strip()[:120]
         self.color_cabecera = COLORES_TONO.get(self.tono, COLORES_TONO['directa'])
         self.en_edicion = False
         self.en_variables = False
@@ -855,6 +857,8 @@ class TarjetaSugerenciaFlotante(_VentanaFlotanteBase):
         self._nombres_variables = lista_nombres
         self._limpiar_campos_variables()
         iniciales = _valores_iniciales_variables(lista_nombres)
+        if 'nombre' in lista_nombres and self._nombre_contacto:
+            iniciales.setdefault('nombre', self._nombre_contacto)
 
         for idx, nombre in enumerate(lista_nombres):
             fila_widget = QWidget(self._contenedor_variables)
@@ -1366,6 +1370,7 @@ class ControladorFlotanteQt(QObject):
         if not self._barra_viva():
             return
         tema_chat, animo_chat, urgencia_chat, opciones = _extraer_resultado(resultado)
+        nombre_contacto = str(_leer_campo(resultado, 'nombre_contacto', '') or '').strip()
         self.barra.mostrar_aviso('')
         self.barra.actualizar_contexto(tema_chat, animo_chat, urgencia_chat)
 
@@ -1378,6 +1383,7 @@ class ControladorFlotanteQt(QObject):
                 al_usar=self._manejar_usar,
                 al_descartar=self._descartar_tarjeta,
                 al_cambiar_tamano=self._al_cambiar_tamano_tarjeta,
+                nombre_contacto=nombre_contacto,
             )
             self.tarjetas.append(tarjeta)
 

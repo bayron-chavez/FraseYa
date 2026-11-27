@@ -113,6 +113,7 @@ class _AsistenteVivoQt:
     def _al_mensaje_puente(self, texto, meta):
         self._ultimo_mensaje_ext_ts = time.monotonic()
         chat_meta = meta.get('chat', '') if isinstance(meta, dict) else ''
+        remitente_meta = meta.get('remitente', '') if isinstance(meta, dict) else ''
         rol_meta = meta.get('rol') if isinstance(meta, dict) else None
         turnos_meta = meta.get('turnos') if isinstance(meta, dict) else None
         if rol_meta or turnos_meta:
@@ -121,9 +122,14 @@ class _AsistenteVivoQt:
                 rol=rol_meta or 'cliente',
                 chat=chat_meta,
                 turnos=turnos_meta,
+                remitente=remitente_meta,
             )
         else:
-            registrado = self.servicio.registrar_mensaje_entrante(texto, chat=chat_meta)
+            registrado = self.servicio.registrar_mensaje_entrante(
+                texto,
+                chat=chat_meta,
+                remitente=remitente_meta,
+            )
         if registrado and (rol_meta or 'cliente') == 'cliente':
             self.eventos.put((
                 'aviso_suave',
